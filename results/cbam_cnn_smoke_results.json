@@ -1,0 +1,73 @@
+{
+  "cbam_cnn": {
+    "overall_metrics": {
+      "accuracy": 0.02262443438914027,
+      "precision": 0.006615982103005694,
+      "recall": 0.14713788741302972,
+      "f1": 0.012638477454037803
+    },
+    "per_class_metrics": {
+      "Center": {
+        "accuracy": 0.9940828402366864,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "Donut": {
+        "accuracy": 1.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "Edge-Loc": {
+        "accuracy": 0.3386703793943613,
+        "precision": 0.014783526927138331,
+        "recall": 0.45161290322580644,
+        "f1": 0.028629856850715747
+      },
+      "Edge-Ring": {
+        "accuracy": 0.9965193177862861,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "Loc": {
+        "accuracy": 0.6703793943612948,
+        "precision": 0.03814432989690722,
+        "recall": 0.7254901960784313,
+        "f1": 0.07247796278158668
+      },
+      "Near-full": {
+        "accuracy": 0.998259658893143,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "Random": {
+        "accuracy": 0.9912982944657153,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "Scratch": {
+        "accuracy": 0.9944309084580578,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "None": {
+        "accuracy": 0.06160807518273582,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "paper_metrics": {
+      "accuracy": 0.9988,
+      "precision": 0.9956,
+      "recall": 0.99,
+      "f1": 0.9983
+    },
+    "epochs_trained": 2
+  }
+}

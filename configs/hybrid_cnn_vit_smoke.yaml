@@ -1,0 +1,58 @@
+# Смоук-версия configs/hybrid_cnn_vit.yaml: минимальные эпохи на каждый из
+# 3 этапов, маленький unlabeled_pool_size/balance_target_per_class и
+# уменьшенный mc_samples, чтобы за пару минут проверить весь пайплайн
+# (MC-Dropout псевдо-разметка + class-adaptive threshold + weighted CE)
+# без ошибок, прежде чем гнать полный прогон.
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  resize_to: 32
+  unlabeled_pool_size: 500     # маленький пул для быстрой проверки
+  balance_target_per_class: 20
+  seed: 42
+
+model:
+  input_channels: 3
+  input_size: 32
+  num_classes: 9
+  embed_dim: 128
+  token_grid_size: 8
+  num_layers: 4
+  num_heads: 8
+  ffn_dim: 256
+  pre_transformer_dropout: 0.5
+  transformer_dropout: 0.2
+
+method:
+  name: "hybrid_cnn_vit"
+  stage1_epochs: 1
+  stage2_epochs: 1
+  stage3_epochs: 1
+  mc_samples: 3         # статья: 20, здесь урезано для скорости смоук-теста
+  tau_base: 0.94
+  alpha: 0.08
+  beta: 0.02
+  eps_entropy: 0.08
+  eps_mi: 0.12
+
+train:
+  batch_size: 32
+  epochs: 3
+  lr: 0.00005
+  optimizer: "adamw"
+  weight_decay: 0.0004
+  device: "auto"
+  num_workers: 0
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/hybrid_cnn_vit_smoke_checkpoint.pt"
+  results_path: "results/hybrid_cnn_vit_smoke_results.json"
+
+paper_metrics:
+  hybrid_cnn_vit: {accuracy: 0.9872, precision: null, recall: null, f1: 0.9861}

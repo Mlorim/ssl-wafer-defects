@@ -1,0 +1,56 @@
+# Смоук-версия configs/latent_vector_representation.yaml: минимальные эпохи
+# по каждой фазе + маленький target_per_class, чтобы за пару минут проверить,
+# что весь 5-фазный пайплайн (VAE pretrain -> teacher -> pseudo-labeling ->
+# student -> fine-tune) отрабатывает без ошибок, прежде чем гнать полный прогон.
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  labeled_ratio: 0.10
+  balance_method: "smote"
+  seed: 42
+
+model:
+  backbone: "resnet50"
+  input_channels: 1
+  num_classes: 9
+  pretrained: false
+  latent_dim: 128
+  vae_hidden_channels: [32, 64, 128]
+  fusion_stage: 2
+
+method:
+  name: "latent_vector_representation"
+  confidence_threshold: 0.9
+  target_per_class: 20      # маленький top-K для быстрой проверки
+  vae_epochs: 1
+  vae_lr: 0.001
+  vae_kl_weight: 1.0
+  teacher_epochs: 1
+  student_epochs: 2
+  finetune_epochs: 1
+  finetune_lr: 0.0002
+
+train:
+  batch_size: 64
+  epochs: 2
+  lr: 0.002
+  optimizer: "adam"
+  adam_beta1: 0.9
+  adam_beta2: 0.99
+  weight_decay: 0.0001
+  device: "auto"
+  num_workers: 4
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/latent_vector_representation_smoke_checkpoint.pt"
+  results_path: "results/latent_vector_representation_smoke_results.json"
+
+paper_metrics:
+  baseline: {precision: 0.932, recall: 0.911, f1: 0.944, accuracy: 0.961}
+  latent_vector_representation: {precision: 0.946, recall: 0.912, f1: 0.962, accuracy: 0.977}

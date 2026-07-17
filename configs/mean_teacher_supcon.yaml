@@ -1,0 +1,52 @@
+# Конфиг для воспроизведения Wei et al. (2024) "Mean Teacher with Supcontrast Loss"
+# Используется всеми 4 методами статьи через --method (baseline/mean_teacher/supcon/mean_teacher_supcon),
+# гиперпараметры конкретного метода читаются train.py по необходимости.
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  labeled_ratio: 0.10        # статья: "training on 10% of the WM811K dataset"
+  balance_method: "smote"    # smote | undersample | none
+  seed: 42
+
+model:
+  backbone: "resnet18"
+  input_channels: 1
+  num_classes: 9
+  pretrained: false
+  projection_dim: 128        # только для supcon / mean_teacher_supcon
+  projection_hidden_dim: 512
+
+method:
+  name: "mean_teacher_supcon"   # baseline | mean_teacher | supcon | mean_teacher_supcon
+  ema_alpha: 0.99                # не указано явно в статье, стандартное значение из Tarvainen & Valpola
+  consistency_weight: 1.0
+  supcon_weight: 1.0
+  supcon_temperature: 0.07       # tau из формулы (2), стандартное значение SupCon (Khosla et al.)
+
+train:
+  batch_size: 64
+  epochs: 2
+  lr: 0.001
+  optimizer: "adam"
+  weight_decay: 0.0001
+  device: "auto"                # auto (cuda -> mps -> cpu) | cuda | mps | cpu
+  num_workers: 4
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 5                # считать метрики каждые N эпох
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/mean_teacher_supcon_checkpoint.pt"
+  results_path: "results/mean_teacher_supcon_results.json"
+
+# Заявленные в статье результаты (Table I), используются в compare_to_paper.
+# Раньше жили в PAPER_RESULTS в evaluate.py — перенесены в конфиг, т.к. разные
+# статьи заявляют разные числа под одними и теми же именами методов.
+paper_metrics:
+  baseline: {accuracy: 0.7917, precision: 0.7956, recall: 0.7899, f1: 0.7887}
+  mean_teacher: {accuracy: 0.8114, precision: 0.8255, recall: 0.8115, f1: 0.8129}
+  supcon: {accuracy: 0.8413, precision: 0.8553, recall: 0.8337, f1: 0.8298}
+  mean_teacher_supcon: {accuracy: 0.8463, precision: 0.8624, recall: 0.8441, f1: 0.8340}

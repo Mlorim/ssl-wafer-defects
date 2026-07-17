@@ -1,0 +1,54 @@
+# Смоук-версия configs/mm_wae.yaml: минимум эпох, чтобы за пару минут
+# проверить весь пайплайн (3 ветви признаков -> fusion -> WAE -> decoder +
+# классификатор, чередование labeled/unlabeled батчей, все 4 loss-компонента)
+# без ошибок, прежде чем гнать полный прогон.
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  resize_to: 32
+  pixel_range: [-1.0, 1.0]
+  labeled_ratio: 0.10
+  balance_method: "none"
+  seed: 42
+
+model:
+  num_classes: 9
+  input_size: 32
+  latent_dim: 64
+  spatial_dim: 512
+  freq_dim: 64
+  texture_dim: 128
+  fusion_dim: 256
+  fusion_heads: 4
+  classifier_hidden_dim: 128
+
+method:
+  name: "mm_wae"
+  lambda_mmd: 1.0
+  lambda_cls: 1.0
+  lambda_cons: 1.0
+  class_alpha: 1.5
+  mmd_c: null
+  grad_clip_norm: 1.0
+
+train:
+  batch_size: 32
+  epochs: 2
+  lr: 0.0005
+  optimizer: "adam"
+  weight_decay: 0.00001
+  device: "auto"
+  num_workers: 0
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/mm_wae_smoke_checkpoint.pt"
+  results_path: "results/mm_wae_smoke_results.json"
+
+paper_metrics:
+  mm_wae: {precision: 0.9611, recall: 0.9623, f1: 0.9617, accuracy: 0.9712}

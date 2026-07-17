@@ -1,0 +1,60 @@
+# Конфиг для воспроизведения Wei, Zhao, Zheng, Zeng (2024) —
+# "Wafer Map Defect Patterns Semi-Supervised Classification Using Latent
+# Vector Representation" (papers/Latent Vector Representation.tex).
+#
+# Table II статьи сравнивает 2 варианта:
+#   --method baseline                      -> "Without VAE" (обычный ResNet-50)
+#   --method latent_vector_representation  -> "With VAE" (VAE latent fusion + teacher-student pseudo-labeling)
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  labeled_ratio: 0.10
+  balance_method: "smote"       # статья балансирует labeled-часть до ~2000/класс, см. method.target_per_class
+  seed: 42
+
+model:
+  backbone: "resnet50"          # статья: "For both the teacher and student models, we employ ResNet-50"
+  input_channels: 1
+  num_classes: 9
+  pretrained: false
+  latent_dim: 128                       # размер VAE latent vector Z
+  vae_hidden_channels: [32, 64, 128]     # encoder/decoder conv channel progression (64->32->16->8 spatial)
+  fusion_stage: 2                        # после какого stage ResNet вплавлять latent vector (paper ablation: stage2 оптимален)
+
+method:
+  name: "latent_vector_representation"
+  confidence_threshold: 0.9    # статья: порог уверенности teacher для отбора псевдо-разметки
+  target_per_class: 2000        # top-K пседво-labeled сэмплов на класс (не указано явно в статье, берём = target балансировки)
+  vae_epochs: 30                 # статья не указывает отдельно эпохи VAE-претрейна от общих 100 — разумное подмножество
+  vae_lr: 0.001
+  vae_kl_weight: 1.0               # вес KL-члена ELBO (стандартный VAE, не beta-VAE)
+  teacher_epochs: 30                # эпох обучения initial teacher (только labeled)
+  student_epochs: 100                 # статья: "training epoch setting of 100" — основная student-фаза
+  finetune_epochs: 20                   # эпох fine-tune student на labeled-only после student-фазы
+  finetune_lr: 0.0002                    # ниже student LR — стандартная практика fine-tuning
+
+train:
+  batch_size: 64
+  epochs: 100              # используется как student_epochs, если method.student_epochs не задан
+  lr: 0.002                 # статья: "initial learning rate (LR) of 0.002"
+  optimizer: "adam"
+  adam_beta1: 0.9             # статья: beta1 = 0.9
+  adam_beta2: 0.99             # статья: beta2 = 0.99 (нестандартно! PyTorch default 0.999)
+  weight_decay: 0.0001
+  device: "auto"                 # auto (cuda -> mps -> cpu) | cuda | mps | cpu
+  num_workers: 4
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 10
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/latent_vector_representation_checkpoint.pt"
+  results_path: "results/latent_vector_representation_results.json"
+
+# Table II статьи (P, R, F1, A) — используются в compare_to_paper.
+paper_metrics:
+  baseline: {precision: 0.932, recall: 0.911, f1: 0.944, accuracy: 0.961}
+  latent_vector_representation: {precision: 0.946, recall: 0.912, f1: 0.962, accuracy: 0.977}

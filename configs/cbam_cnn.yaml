@@ -1,0 +1,52 @@
+# Конфиг для воспроизведения "CBAM-enhanced lightweight CNN for wafer map
+# defect classification" (papers/CBAM-enhanced lightweight CNN for wafer map
+# defect classification.tex). Полностью supervised метод — без unlabeled данных,
+# без pseudo-labeling/consistency. Использует нативное разрешение WM-811K
+# (26x26, без ресайза) в one-hot представлении [H,W,3].
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  native_size: 26           # только карты нативного разрешения 26x26 (без ресайза, во избежание артефактов интерполяции)
+  target_per_class: 2000     # downsampling "None" + CAE-аугментация миноритарных до этого размера (статья: ~2000-2400/класс)
+  cae_epochs: 20               # эпох обучения CAE перед аугментацией (не указано явно в статье)
+  cae_noise_std: 0.1             # sigma шума в латенте CAE: Z_noisy = Z + eps, eps~N(0,sigma^2)
+  val_ratio: 0.1                   # доля под validation (не участвует в CAE-аугментации, для early stopping)
+  seed: 42
+
+model:
+  input_channels: 3             # one-hot: фон / годный чип / брак
+  num_classes: 9
+  conv1_channels: 32               # статья не специфицирует явно; разумный дефолт
+  conv2_channels: 72                 # подобран из x ∈ R^1152 при финальной feature map 4x4 (4*4*72=1152)
+  cbam_reduction: 8                   # статья: reduction ratio r=8 в channel attention MLP
+  hidden_dim: 128                       # статья: скрытый FC слой 128 нейронов перед выходом на 9 классов
+
+method:
+  name: "cbam_cnn"
+  max_epochs: 30           # потолок — реальное (оптимальное) число эпох определяется early stopping по валидации
+  patience: 5                # останов, если val F1 не улучшается patience эпох подряд
+
+train:
+  batch_size: 128       # статья: mini-batch size = 128
+  epochs: 30               # не используется напрямую (fit() переопределён и использует method.max_epochs) — держим равным max_epochs для консистентности в results JSON
+  lr: 0.0001                 # статья: learning rate = 1e-4
+  optimizer: "adam"
+  weight_decay: 0.0
+  device: "auto"              # auto (cuda -> mps -> cpu) | cuda | mps | cpu
+  num_workers: 4
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 5
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/cbam_cnn_checkpoint.pt"
+  results_path: "results/cbam_cnn_results.json"
+
+# "Сводные показатели точности и сложности" (accuracy, macro-F1 из ablation
+# "Полная модель"). precision/recall macro-averaged вручную из таблицы
+# поклассовых метрик "Proposed CBAM-CNN" (статья не даёт агрегированные P/R напрямую).
+paper_metrics:
+  cbam_cnn: {accuracy: 0.9988, precision: 0.9956, recall: 0.9900, f1: 0.9983}

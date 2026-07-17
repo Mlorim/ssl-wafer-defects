@@ -1,0 +1,55 @@
+# Конфиг для воспроизведения "MM-WAE: Multimodal Wasserstein Autoencoders for
+# Semi-Supervised Wafer Map Defect Recognition" (Zhang, Sun, Liu, Zhang, 2026).
+# Три ветви признаков (spatial/frequency/texture) -> gated fusion -> WAE
+# (детерминированный энкодер + MMD-регуляризация) -> decoder + классификатор.
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  resize_to: 32              # статья: "all wafer maps are resized to 32x32"
+  pixel_range: [-1.0, 1.0]     # статья: "pixel intensities normalized to [-1,1]"
+  labeled_ratio: 0.10           # статья тестирует 5% и 10% — здесь 10% (Table 3)
+  balance_method: "none"          # статья НЕ применяет oversampling — imbalance компенсируется weighted CE
+  seed: 42
+
+model:
+  num_classes: 9
+  input_size: 32
+  latent_dim: 64            # статья: z ∈ R^64
+  spatial_dim: 512            # статья: f(s) ∈ R^512
+  freq_dim: 64                  # статья: f(f) ∈ R^64 (4 канала x 4x4 adaptive pool)
+  texture_dim: 128                # статья: f(t) ∈ R^128 (32 канала x 2x2 adaptive pool)
+  fusion_dim: 256                   # статья: d_m = 256 (проекция каждой ветви)
+  fusion_heads: 4                     # статья не даёт число голов MHA явно — разумный дефолт
+  classifier_hidden_dim: 128            # статья: h(c) ∈ R^128
+
+method:
+  name: "mm_wae"
+  lambda_mmd: 1.0      # статья не даёт числовые веса loss явно — разумные дефолты (все = 1.0)
+  lambda_cls: 1.0
+  lambda_cons: 1.0
+  class_alpha: 1.5       # alpha в w_c=1/log(alpha+pi_c); статья: "alpha > 1", точное значение не дано
+  mmd_c: null              # null -> эвристика c=2*latent_dim (Tolstikhin et al. 2018); статья не задаёт c явно
+  grad_clip_norm: 1.0        # статья: "gradient clipping with a maximum l2-norm of 1.0"
+
+train:
+  batch_size: 256    # статья: batch size = 256
+  epochs: 100          # статья: "maximum training epochs are set to 100" (early stopping не реализован, см. допущения)
+  lr: 0.0005             # статья: initial learning rate 5e-4
+  optimizer: "adam"        # статья: Adam (не AdamW)
+  weight_decay: 0.00001     # статья: weight decay 1e-5
+  device: "auto"
+  num_workers: 4
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 5
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/mm_wae_checkpoint.pt"
+  results_path: "results/mm_wae_results.json"
+
+# Table 3 статьи (10% labeled data).
+paper_metrics:
+  mm_wae: {precision: 0.9611, recall: 0.9623, f1: 0.9617, accuracy: 0.9712}

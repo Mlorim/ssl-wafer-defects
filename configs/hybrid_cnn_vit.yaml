@@ -1,0 +1,63 @@
+# Конфиг для воспроизведения классификационной части статьи "SemiWaferNet:
+# Efficient Semi-Supervised Hybrid CNN-Transformer Models for Wafer Defect
+# Classification and Segmentation" (papers/SemiWaferNet Defect Classification.pdf).
+# Реализован только HybridCNN-ViT (классификация, three-stage progressive
+# pseudo-labeling); сегментационная часть статьи (ConvoFormer-UNet) не реализована.
+
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  resize_to: 32                    # статья: "wafer maps used for classification are resized to 32x32"
+  unlabeled_pool_size: 150000        # статья: 150 000 unlabeled сэмплов добавлено к balanced labeled train
+  balance_target_per_class: 2000      # "hybrid sampling": downsample "None" + SMOTE миноритарных до этого размера
+  seed: 42
+
+model:
+  input_channels: 3          # one-hot: фон / годный чип / брак
+  input_size: 32
+  num_classes: 9
+  embed_dim: 128                # статья: D=128
+  token_grid_size: 8               # F2=128x8x8 при input_size=32 -> N=64 токена
+  num_layers: 4                       # статья: L=4 (L=6 даёт +0.37% ценой +48% вычислений)
+  num_heads: 8                          # статья: 8 attention heads
+  ffn_dim: 256                            # статья: feed-forward dimension 256
+  pre_transformer_dropout: 0.5              # статья: dropout 0.5 перед Transformer энкодером
+  transformer_dropout: 0.2                    # статья: dropout 0.2 внутри encoder layers
+
+method:
+  name: "hybrid_cnn_vit"
+  # статья обучает 50 эпох суммарно на 3 этапа, точное разбиение по этапам не
+  # указано явно — разумное распределение (warm-up короче, refine-этапы дольше)
+  stage1_epochs: 15
+  stage2_epochs: 15
+  stage3_epochs: 20
+  mc_samples: 20             # статья: M=20 стохастических forward pass (MC-Dropout)
+  tau_base: 0.94               # статья: калиброванные значения (раздел 2.2)
+  alpha: 0.08
+  beta: 0.02
+  eps_entropy: 0.08
+  eps_mi: 0.12
+
+train:
+  batch_size: 256    # статья: batch size = 256
+  epochs: 50           # сумма stage1+stage2+stage3 — используется только для отчётности (эпохи по факту берутся из method:)
+  lr: 0.00005            # статья: learning rate 5e-5
+  optimizer: "adamw"       # статья: AdamW
+  weight_decay: 0.0004       # статья: weight decay 4e-4
+  device: "auto"
+  num_workers: 4
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 5
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/hybrid_cnn_vit_checkpoint.pt"
+  results_path: "results/hybrid_cnn_vit_results.json"
+
+# Table 6 статьи (Acc/Macro-F1/Macro-AUC/Cohen Kappa для HybridCNN-ViT + SSL).
+# accuracy/f1 напрямую сопоставимы с нашими compute_metrics; macro-AUC/kappa
+# статья приводит отдельно и здесь не воспроизводятся (нет в evaluate.py).
+paper_metrics:
+  hybrid_cnn_vit: {accuracy: 0.9872, precision: null, recall: null, f1: 0.9861}

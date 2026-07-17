@@ -1,0 +1,314 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{array}
+\usepackage{microtype}
+
+\geometry{top=2cm, bottom=2cm, left=2cm, right=2cm}
+
+\begin{document}
+
+\section{Полное описание используемого метода}
+
+Предложенный метод представляет собой легковесную и интерпретируемую систему автоматической классификации дефектов на картах кремниевых пластин (wafer maps) по 9 каноническим классам (\textit{Center, Donut, Edge-Loc, Edge-Ring, Loc, Random, Scratch, Near-Full, None}). Метод решает три основные проблемы: сильный дисбаланс классов, жесткие ограничения на вычислительные ресурсы (параметры/память) и необходимость интерпретируемости решений.
+
+Метод состоит из трех основных этапов:
+\begin{enumerate}
+    \item \textbf{Препроцессинг и балансировка данных (на этапе обучения):}
+    \begin{itemize}
+        \item Выбираются карты пластин строго в исходном разрешении $26 \times 26$ без изменения размера, чтобы избежать артефактов интерполяции.
+        \item Каждая карта кодируется в трехканальный one-hot тензор размерности $26 \times 26 \times 3$ (каналы: фон/отсутствие чипа, годный чип, дефектный чип).
+        \item Борьба с дисбалансом классов ведется за счет комбинации уменьшения масштаба (\textit{downsampling}) мажоритарного класса \textit{None} и генеративного расширения (\textit{data augmentation}) миноритарных классов с использованием сверточного автокодировщика (CAE).
+    \end{itemize}
+
+    \item \textbf{Легковесная архитектура сверточной нейросети с модифицированным CBAM (Proposed CBAM-CNN):}
+    \begin{itemize}
+        \item Состоит из двух блоков «Свертка — ReLU — MaxPool», после каждого из которых интегрирован модифицированный модуль внимания CBAM (\textit{Convolutional Block Attention Module}). Модификации направлены на адаптацию к низкому разрешению $26 \times 26$ и стабилизацию обучения при сильном дисбалансе классов.
+        \item \textbf{Канальное внимание (Channel Attention):} Использует общий двухслойный MLP, но с добавлением слоев пакетной нормализации (\textit{Batch Normalization}) после каждого аффинного преобразования для стабилизации активаций на малых пространственных сетках.
+        \item \textbf{Пространственное внимание (Spatial Attention):} Заменяет стандартную одиночную свертку на параллельный мультимасштабный блок с ядрами свертки $3 \times 3$, $5 \times 5$ и $7 \times 7$, выходы которых объединяются операцией усреднения. Это позволяет одновременно улавливать как мелкие царапины, так и крупные кольцевые/периферийные дефекты.
+        \item \textbf{Резидуальные связи (Residual Skips):} Внутри каждого CBAM-блока добавлен сквозной проброс градиента (\textit{skip connection}) для предотвращения затухания градиентов и переподавления признаков.
+    \end{itemize}
+
+    \item \textbf{Классификационная голова:}
+    \begin{itemize}
+        \item Тензор признаков после второго CBAM сжимается (\textit{Flatten}) и пропускается через скрытый полносвязный слой (128 нейронов, ReLU) на выходной слой с 9 нейронами и функцией активации Softmax. Общий размер модели составляет всего около 153 тыс. параметров ($\sim$0.6 МБ в формате FP32).
+    \end{itemize}
+\end{enumerate}
+
+\section{Математические формулы метода}
+
+\subsection{Препроцессинг и кодирование}
+Исходный labeled корпус дефектов $D_0$ фильтруется до подмножества $D_{26}$ карт с разрешением $26 \times 26$:
+\begin{equation}
+D_{26} = \left\{ X \in D_0 \;\Big\vert\; X \in \{0, 1, 2\}^{26 \times 26} \right\}
+\end{equation}
+где значения $0, 1, 2$ соответствуют состояниям: фон, годен, брак.
+
+Каждая карта $X$ преобразуется в тензор $T \in \{0,1\}^{26 \times 26 \times 3}$:
+\begin{equation}
+T(i, j, c) = \mathbf{1}[X(i, j) = c], \quad c \in \{0, 1, 2\}
+\end{equation}
+
+\subsection{Математика сверточного бэкбона}
+Дискретная 2D-свертка на слое $l$ выражается формулой:
+\begin{equation}
+\left(X^{(l-1)} * W^{(l)}\right)_{(i,j,c)} = \sum_{u=0}^{k-1} \sum_{v=0}^{k-1} \sum_{\gamma=1}^{C^{(l-1)}} W^{(l)}_{(u,v,\gamma,c)} X^{(l-1)}_{(i+u-p_t, \; j+v-p_l, \; \gamma)}
+\end{equation}
+
+Активация признаков с использованием функции ReLU:
+\begin{equation}
+F^l = \phi\left(X^{(l-1)} * W^{(l)} + b^{(l)}\right), \quad \phi(x) = \max(0, x)
+\end{equation}
+
+Размерность карты признаков после свертки со страйдом $s$ и паддингом $p_t, p_b, p_l, p_r$:
+\begin{equation}
+H_l = \left\lfloor \frac{H_{(l-1)} + p_t + p_b - k}{s} \right\rfloor + 1
+\end{equation}
+\begin{equation}
+W_l = \left\lfloor \frac{W_{(l-1)} + p_l + p_r - k}{s} \right\rfloor + 1
+\end{equation}
+
+Операция MaxPooling $2 \times 2$ со страйдом 2:
+\begin{equation}
+P^l(i, j, c) = \max_{0 \le u, v < 2} F^l(2i+u, \; 2j+v, \; c), \quad H_{pool}^l = \lfloor H_l / 2 \rfloor, \quad W_{pool}^l = \lfloor W_l / 2 \rfloor
+\end{equation}
+
+Рекурсия эффективного рецептивного поля слоя $l$ ($r_l$) со страйдом $j_l$:
+\begin{equation}
+r_l = r_{(l-1)} + (k_l - 1)j_{(l-1)}, \quad j_l = j_{(l-1)}s_l \quad (\text{при } r_0 = j_0 = 1)
+\end{equation}
+
+Для архитектуры CBAM-CNN прогрессия имеет вид:
+\begin{itemize}
+    \item $\text{conv1 } (k=4, s=1) \Rightarrow r_1=4, j_1=1$
+    \item $\text{pool1 } (k=2, s=2) \Rightarrow r_2=5, j_2=2$
+    \item $\text{conv2 } (k=3, s=1) \Rightarrow r_3=9, j_3=2$
+    \item $\text{pool2 } (k=2, s=2) \Rightarrow r_4=11, j_4=4$
+\end{itemize}
+Каждый юнит итоговой карты признаков $4 \times 4$ покрывает рецептивную область размером $22 \times 22$ от исходного изображения $26 \times 26$.
+
+\subsection{Модифицированный блок CBAM}
+Общая последовательность применения масок внимания:
+\begin{equation}
+X' = M_c(P_l) \odot P_l, \quad X_l = M_s(X') \odot X'
+\end{equation}
+
+\subsubsection*{Канальное внимание (Channel Attention)}
+Векторы глобального усреднения (GAP) и максимизации (GMP):
+\begin{equation}
+s_{avg} = \text{GAP}(F) \in \mathbb{R}^C, \quad s_{max} = \text{GMP}(F) \in \mathbb{R}^C
+\end{equation}
+
+Функция обработки векторов в общем MLP со слоями пакетной нормализации ($\text{BN}_1, \text{BN}_2$) и коэффициентом сжатия $r=8$:
+\begin{equation}
+g(s) = \text{BN}_2\left(W_2 \delta\left(\text{BN}_1\left(W_1 s\right)\right)\right), \quad W_1 \in \mathbb{R}^{\frac{C}{r} \times C}, \; W_2 \in \mathbb{R}^{C \times \frac{C}{r}}
+\end{equation}
+\begin{equation}
+M_c(F) = \sigma\left(g(s_{avg}) + g(s_{max})\right) \in [0, 1]^C
+\end{equation}
+где $\delta$ — активация ReLU, а $\sigma$ — сигмоида. Выходной канальный тензор:
+\begin{equation}
+F' = M_c(F) \odot F
+\end{equation}
+
+\subsubsection*{Пространственное внимание (Spatial Attention)}
+Входной тензор $F'$ сжимается по каналам:
+\begin{equation}
+Q = \left[\text{AvgPool}_c(F'), \; \text{MaxPool}_c(F')\right] \in \mathbb{R}^{H \times W \times 2}
+\end{equation}
+
+Применение мультимасштабных параллельных сверток $k \times k$ ($k \in \{3, 5, 7\}$) и их усреднение:
+\begin{equation}
+A_k = \text{Conv}_{k \times k}(Q) \in \mathbb{R}^{H \times W \times 1}, \quad k \in \{3, 5, 7\}
+\end{equation}
+\begin{equation}
+M_s(F') = \sigma\left(\text{Fuse}(A_3, A_5, A_7)\right), \quad \text{Fuse} = \frac{A_3 + A_5 + A_7}{3}
+\end{equation}
+
+Выход пространственного внимания:
+\begin{equation}
+\tilde{F} = M_s(F') \odot F'
+\end{equation}
+
+\subsubsection*{Резидуальное сложение}
+\begin{equation}
+Y = \tilde{F} + F
+\end{equation}
+
+\subsection{Полносвязный классификатор и функция потерь}
+Преобразование в вектор $x \in \mathbb{R}^{1152}$ и прохождение через скрытый и выходной слои:
+\begin{equation}
+h = \text{ReLU}(W_1 x + b_1) \in \mathbb{R}^{128}, \quad z = W_2 h + b_2 \in \mathbb{R}^9
+\end{equation}
+\begin{equation}
+p_k = \frac{e^{z_k}}{\sum_{j=1}^9 e^{z_j}}
+\end{equation}
+
+Обучение оптимизирует кросс-энтропию:
+\begin{equation}
+\mathcal{L}_{\text{CCE}} = - \frac{1}{N} \sum_{i=1}^N \sum_{j=1}^9 y_{ij} \log \hat{y}_{ij}
+\end{equation}
+
+\subsection{Математика автокодировщика (CAE)}
+Кодирование:
+\begin{equation}
+Z = f_{\text{encoder}}(X) = \sigma(W_e * X + b_e), \quad Z \in \mathbb{R}^{13 \times 13 \times 64}
+\end{equation}
+
+Декодирование:
+\begin{equation}
+\hat{X} = f_{\text{decoder}}(Z) = \sigma(W_d * Z + b_d)
+\end{equation}
+
+Минимизация среднеквадратичной ошибки (MSE) при обучении:
+\begin{equation}
+\mathcal{L}_{\text{MSE}} = \frac{1}{N} \sum_{i=1}^N \Vert X_i - \hat{X}_i \Vert_2^2
+\end{equation}
+
+Добавление шума в латентное пространство:
+\begin{equation}
+Z_{\text{noisy}} = Z + \epsilon, \quad \epsilon \sim \mathcal{N}(0, \sigma^2)
+\end{equation}
+\begin{equation}
+\hat{X}_{\text{noisy}} = f_{\text{decoder}}(Z_{\text{noisy}})
+\end{equation}
+
+\section{Все результаты экспериментов}
+
+\subsection{Распределение классов до и после балансировки (в обучающей выборке)}
+Балансировка применялась только к тренировочной выборке для предотвращения утечки данных (валидационный и тестовый наборы оставались строго реальными):
+
+\begin{table}[h!]
+\centering
+\caption{Распределение классов в обучающей выборке}
+\label{tab:class_distribution}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Класс дефекта} & \textbf{Кол-во до балансировки (\%)} & \textbf{Кол-во после CAE и даунсэмплинга (\%)} \\
+\midrule
+Center & 90 (0.63\%) & 2160 (10.96\%) \\
+Donut & 1 (0.01\%) & 2002 (10.16\%) \\
+Edge-loc & 296 (2.06\%) & 2368 (12.02\%) \\
+Edge-ring & 31 (0.22\%) & 2046 (10.38\%) \\
+Loc & 297 (2.07\%) & 2376 (12.06\%) \\
+Near-full & 16 (0.11\%) & 2032 (10.31\%) \\
+Random & 74 (0.52\%) & 2146 (10.89\%) \\
+Scratch & 72 (0.50\%) & 2088 (10.60\%) \\
+None & 13,489 (93.90\%) & 2489 (12.63\%) \\
+\midrule
+\textbf{Всего} & \textbf{14,366 (100.00\%)} & \textbf{19,707 (100.00\%)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent (Класс \textit{None} был сокращен на 81.56\% — с 13 489 до 2 489 образцов).
+
+\subsection{Сравнение с базовыми моделями по классам}
+В таблице \ref{tab:comparison_baseline} приведено сравнение поклассовой точности предложенного метода с популярными глубокими архитектурами на тестовом наборе $26 \times 26 \times 3$ (метрики: Accuracy / Precision / Recall):
+
+\begin{table}[h!]
+\centering
+\caption{Сравнение поклассовых метрик (Acc / Prec / Rec)}
+\label{tab:comparison_baseline}
+\small
+\begin{tabular}{lccccccccc}
+\toprule
+\textbf{Модель} & \textbf{Center} & \textbf{Donut} & \textbf{Edge-loc} & \textbf{Edge-ring} & \textbf{Loc} & \textbf{Scratch} & \textbf{Near-full} & \textbf{Random} & \textbf{None} \\
+\midrule
+\textbf{ShuffleNet-v2} & 0.952 & 0.965 & 0.976 & 0.958 & 0.965 & 0.984 & 0.985 & 0.969 & 0.968 \\
+& 0.938 & 0.951 & 0.959 & 0.945 & 0.938 & 0.972 & 0.961 & 0.968 & 0.954 \\
+& 0.949 & 0.962 & 0.966 & 0.951 & 0.958 & 0.977 & 0.963 & 0.975 & 0.962 \\
+\midrule
+\textbf{ResNet50} & 0.770 & 0.900 & 0.880 & 0.950 & 0.590 & 0.700 & 0.950 & 0.870 & 0.890 \\
+& 0.790 & 0.860 & 0.860 & 1.000 & 0.650 & 0.700 & 0.900 & 0.890 & 0.910 \\
+& 0.750 & 0.950 & 0.900 & 0.900 & 0.550 & 0.700 & 1.000 & 0.850 & 0.880 \\
+\midrule
+\textbf{EfficientNetB0} & 0.900 & 0.900 & 0.870 & 1.000 & 0.820 & 0.680 & 0.920 & 0.850 & 0.920 \\
+& 0.900 & 0.900 & 0.900 & 0.940 & 1.000 & 0.620 & 0.900 & 0.830 & 0.940 \\
+& 0.900 & 0.900 & 0.900 & 1.000 & 0.700 & 0.750 & 0.950 & 1.000 & 0.900 \\
+\midrule
+\textbf{VGG16} & 0.890 & 0.900 & 0.770 & 0.950 & 0.630 & 0.560 & 0.950 & 0.830 & 0.880 \\
+& 0.940 & 0.860 & 0.740 & 1.000 & 0.620 & 0.580 & 0.900 & 0.940 & 0.920 \\
+& 0.850 & 0.950 & 0.810 & 0.900 & 0.650 & 0.550 & 1.000 & 0.750 & 0.830 \\
+\midrule
+\textbf{DC-net} & 0.990 & 0.978 & 0.965 & 0.944 & 0.998 & 0.980 & 0.958 & 0.934 & 0.991 \\
+& 0.994 & 0.978 & 0.972 & 0.939 & 0.988 & 0.934 & 0.965 & 0.957 & 0.997 \\
+& 0.983 & 0.982 & 0.967 & 0.942 & 0.967 & 0.983 & 0.952 & 0.929 & 0.995 \\
+\midrule
+\textbf{Proposed} & \textbf{0.990} & \textbf{1.000} & \textbf{0.990} & \textbf{1.000} & \textbf{0.980} & \textbf{0.990} & \textbf{1.000} & \textbf{1.000} & \textbf{0.990} \\
+\textbf{CBAM-CNN} & \textbf{0.990} & \textbf{1.000} & \textbf{1.000} & \textbf{0.990} & \textbf{0.990} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{0.990} \\
+& \textbf{1.000} & \textbf{1.000} & \textbf{0.980} & \textbf{1.000} & \textbf{0.960} & \textbf{0.990} & \textbf{1.000} & \textbf{1.000} & \textbf{0.980} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Предложенная модель показывает превосходные результаты в сложных классах \textit{Loc} и \textit{Scratch} (полнота 0.96 и 0.99 соответственно) по сравнению с тяжелыми базовыми сетями.
+
+\subsection{Сводное сравнение эффективности и сложности моделей}
+В таблице \ref{tab:complexity_comparison} приведено сопоставление точности классификации, числа параметров и вычислительной сложности в GFLOPs:
+
+\begin{table}[h!]
+\centering
+\caption{Сводные показатели точности и сложности}
+\label{tab:complexity_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Метод} & \textbf{Accuracy (\%)} & \textbf{Число параметров (M)} & \textbf{Сложность (GFLOPs)} \\
+\midrule
+\textbf{Proposed CBAM-CNN (наш метод)} & \textbf{99.88 $\pm$ 0.037} & \textbf{0.15} & \textbf{$\sim$0.02} \\
+Autoencoder-based CNN (Bao et al., 2024) & 93.10 & 44.00 & — \\
+AC-DDPM + ResNet (Li et al., 2024) & 95.20 & 24.80 & — \\
+WaferCap (Mishra et al., 2024) & 99.00 & — & — \\
+MobileNetV2 & 97.56 & 2.23 & 0.004 \\
+MobileNetV3\_Small & 97.41 & 1.53 & 0.001 \\
+ShuffleNetV2\_x1.0 & 95.44 & 1.26 & 0.002 \\
+EfficientNet-Lite0 & 95.72 & 4.31 & 0.005 \\
+EfficientNetV2\_S & 98.33 & 20.19 & 0.113 \\
+SwinTransformer\_T & 97.41 & 18.86 & 0.061 \\
+Sparse feature learning (Altantawy \& Yakout, 2025) & 98.77 & 0.17 & — \\
+Stacking ensemble model (Yang et al., 2025) & 98.18 & — & — \\
+Soft voting approach (Lee et al., 2025) & 95.09 & — & — \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Модель CBAM–CNN обеспечивает точность 99.88\% на тестовом множестве, используя на 1–2 порядка меньше параметров, чем тяжелые трансформеры или глубокие CNN.
+
+\section{Результаты анализа абляции и стресс-тестирования}
+
+Для оценки вклада каждого отдельного компонента архитектуры и устойчивости модели были проведены абляционные исследования и тесты на устойчивость к шумам (на базе 3 случайных сидов):
+
+\begin{table}[h!]
+\centering
+\caption{Анализ абляции и стресс-тестирование}
+\label{tab:ablation}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Вариант конфигурации} & \textbf{Accuracy (\%)} & \textbf{Macro-F1 (\%)} & \textbf{ECE (\%)} \\
+\midrule
+\multicolumn{4}{l}{\textbf{(I) Абляция компонентов:}} \\
+\textbf{Полная модель (CBAM + мультимасшт. + аугм.)} & \textbf{99.88 $\pm$ 0.05} & \textbf{99.83 $\pm$ 0.06} & \textbf{0.42 $\pm$ 0.08} \\
+Без аугментации данных (CAE) & 98.72 $\pm$ 0.11 & 98.55 $\pm$ 0.13 & 0.96 $\pm$ 0.10 \\
+Без CBAM (чистый сверточный бэкбон) & 98.11 $\pm$ 0.17 & 97.92 $\pm$ 0.19 & 1.21 $\pm$ 0.14 \\
+Только канальное внимание (без пространственного) & 98.96 $\pm$ 0.10 & 98.80 $\pm$ 0.12 & 0.78 $\pm$ 0.09 \\
+\midrule
+\multicolumn{4}{l}{\textbf{(II) Стресс-тесты и дефицит данных:}} \\
+С аддитивным шумом Гаусса на тесте ($\sigma = 0.05$) & 98.34 $\pm$ 0.15 & 98.19 $\pm$ 0.16 & 0.89 $\pm$ 0.11 \\
+Обучение только на 25\% данных & 98.05 $\pm$ 0.18 & 97.84 $\pm$ 0.20 & 1.08 $\pm$ 0.13 \\
+Обучение только на 10\% данных & 96.90 $\pm$ 0.25 & 96.41 $\pm$ 0.28 & 1.42 $\pm$ 0.17 \\
+10\% данных + шум Гаусса ($\sigma = 0.05$) на тесте & 95.82 $\pm$ 0.31 & 95.21 $\pm$ 0.35 & 1.73 $\pm$ 0.22 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{Основные выводы абляции и тестов:}
+\begin{itemize}
+    \item Исключение блока внимания CBAM приводит к наиболее существенному падению качества классификации (снижение Macro-F1 на $\sim$1.9\%).
+    \item Использование пространственного мультимасштабного внимания критически важно: удаление пространственного блока снижает Macro-F1 на $\sim$1.03\%.
+    \item Модель демонстрирует высокую устойчивость к дефициту данных — даже при обучении всего на 10\% от всей выборки метрика Macro-F1 удерживается на высоком уровне 96.41\%.
+\end{itemize}
+
+\end{document}
