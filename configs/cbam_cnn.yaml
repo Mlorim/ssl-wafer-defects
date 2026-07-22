@@ -24,7 +24,7 @@ model:
 method:
   name: "cbam_cnn"
   max_epochs: 30           # потолок — реальное (оптимальное) число эпох определяется early stopping по валидации
-  patience: 5                # останов, если val F1 не улучшается patience эпох подряд
+  patience: 20               # останов, если val F1 не улучшается patience эпох подряд
 
 train:
   batch_size: 128       # статья: mini-batch size = 128
