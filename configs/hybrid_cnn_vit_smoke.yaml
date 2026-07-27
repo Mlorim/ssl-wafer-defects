@@ -9,6 +9,8 @@ dataset:
   resize_to: 32
   unlabeled_pool_size: 500     # маленький пул для быстрой проверки
   balance_target_per_class: 20
+  balance_oversampler: "random"
+  pseudo_eval_ratio: 0.05
   seed: 42
 
 model:
@@ -29,6 +31,7 @@ method:
   stage2_epochs: 1
   stage3_epochs: 1
   mc_samples: 3         # статья: 20, здесь урезано для скорости смоук-теста
+  mc_chunk_size: 3
   tau_base: 0.94
   alpha: 0.08
   beta: 0.02

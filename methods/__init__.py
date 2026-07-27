@@ -39,6 +39,7 @@ from .latent_vector import LatentVectorMethod
 from .cbam_cnn import CBAMCNNMethod
 from .hybrid_vit import HybridCNNViTMethod
 from .mm_wae import MMWAEMethod
+from .efficient_cnn import EfficientCNNMethod
 from .registry import METHOD_REGISTRY, build_method
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "CBAMCNNMethod",
     "HybridCNNViTMethod",
     "MMWAEMethod",
+    "EfficientCNNMethod",
     "METHOD_REGISTRY",
     "build_method",
 ]

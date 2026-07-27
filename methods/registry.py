@@ -17,6 +17,7 @@ from .latent_vector import LatentVectorMethod
 from .cbam_cnn import CBAMCNNMethod
 from .hybrid_vit import HybridCNNViTMethod
 from .mm_wae import MMWAEMethod
+from .efficient_cnn import EfficientCNNMethod
 
 
 METHOD_REGISTRY = {
@@ -28,6 +29,7 @@ METHOD_REGISTRY = {
     "cbam_cnn": CBAMCNNMethod,
     "hybrid_cnn_vit": HybridCNNViTMethod,
     "mm_wae": MMWAEMethod,
+    "efficient_cnn": EfficientCNNMethod,
 }
 
 
@@ -78,4 +80,6 @@ def build_method(method_name: str, model, optimizer_factory, device: str, config
     elif method_name == "hybrid_cnn_vit":
         return method_cls(model, optimizer_factory, device=device, config=config)
     elif method_name == "mm_wae":
+        return method_cls(model, optimizer_factory, device=device, config=config)
+    elif method_name == "efficient_cnn":
         return method_cls(model, optimizer_factory, device=device, config=config)

@@ -1,0 +1,43 @@
+# Shin and Yoo, "Efficient Convolutional Neural Networks for Semiconductor
+# Wafer Bin Map Classification", Sensors 2023. Unknown paper details
+# (epochs, augmentation probabilities and checkpoint rule) use conventional
+# reproducible defaults and are intentionally explicit here.
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  seed: 42
+  image_size: 224
+  rotation_degrees: 180
+  transform_probability: 0.5
+
+model:
+  num_classes: 9
+  backbone: "mobilenet_v3_small"
+
+method:
+  name: "efficient_cnn"
+  num_folds: 4
+  max_folds: 4
+  target_per_defect_class: 10000
+  patience: 10
+
+train:
+  batch_size: 128
+  epochs: 50
+  lr: 0.0001
+  optimizer: "adam"
+  weight_decay: 0.0
+  device: "auto"
+  num_workers: 0
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/efficient_cnn_checkpoint.pt"
+  results_path: "results/efficient_cnn_results.json"
+
+paper_metrics:
+  efficient_cnn: {accuracy: 0.980, precision: 0.909, recall: 0.885, f1: 0.895}

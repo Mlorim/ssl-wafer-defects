@@ -8,14 +8,8 @@ dataset:
   path: "data/raw/LSWMD.pkl"
   resize_to: 32                    # статья: "wafer maps used for classification are resized to 32x32"
   unlabeled_pool_size: 150000        # статья: 150 000 unlabeled сэмплов добавлено к balanced labeled train
-  # Статья не публикует итоговый target hybrid sampling. 2000 оставлен как
-  # явное воспроизводимое допущение.
-  balance_target_per_class: 2000
-  # Для категориальных пространственных масок random oversampling надёжнее
-  # pixel-space SMOTE, который смешивает геометрию разных wafer maps.
-  balance_oversampler: "random"
+  balance_target_per_class: 2000      # "hybrid sampling": downsample "None" + SMOTE миноритарных до этого размера (выход SMOTE бинаризуется обратно в one-hot)
   val_ratio: 0.1                      # доля validation внутри ОФИЦИАЛЬНОЙ train-части (статья, секция 4.1); сплит train/test — официальный trianTestLabel из WM-811K, не случайный
-  pseudo_eval_ratio: 0.05             # отдельный labeled split для калибровки pseudo-label selection
   seed: 42
 
 model:
@@ -32,17 +26,12 @@ model:
 
 method:
   name: "hybrid_cnn_vit"
-  # Точное разбиение 50 эпох и LR стадий статья не публикует. Teacher обучается
-  # с нуля, поэтому ему отдаётся основная часть бюджета и scratch-training LR;
-  # refinement выполняется меньшим LR, чтобы не разрушать teacher.
-  stage1_epochs: 30
-  stage2_epochs: 10
-  stage3_epochs: 10
-  stage1_lr: 0.001
-  stage2_lr: 0.0002
-  stage3_lr: 0.0001
+  # статья обучает 50 эпох суммарно на 3 этапа, точное разбиение по этапам не
+  # указано явно — разумное распределение (warm-up короче, refine-этапы дольше)
+  stage1_epochs: 15
+  stage2_epochs: 15
+  stage3_epochs: 20
   mc_samples: 20             # статья: M=20 стохастических forward pass (MC-Dropout)
-  mc_chunk_size: 4           # те же MC-сэмплы группами для эффективного GPU/MPS инференса
   tau_base: 0.94               # статья: калиброванные значения (раздел 2.2)
   alpha: 0.08
   beta: 0.02
@@ -56,7 +45,7 @@ train:
   optimizer: "adamw"       # статья: AdamW
   weight_decay: 0.0004       # статья: weight decay 4e-4
   device: "auto"
-  num_workers: 4
+  num_workers: 0
 
 eval:
   metrics: ["accuracy", "precision", "recall", "f1"]

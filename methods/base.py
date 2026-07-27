@@ -51,6 +51,11 @@ class SSLMethod(ABC):
         """
         return loader_factory.eval_loader(data["test_images"], data["test_labels"])
 
+    def build_val_loader(self, data: dict, loader_factory):
+        if len(data.get("val_images", [])) == 0:
+            return self.build_eval_loader(data, loader_factory)
+        return loader_factory.eval_loader(data["val_images"], data["val_labels"])
+
     def fit(self, data: dict, loader_factory, epochs: int, eval_every: int, checkpoint_path: str, log_fn=print) -> dict:
         """
         Дефолтная (однофазная) реализация: строит loader'ы один раз, затем
@@ -58,7 +63,7 @@ class SSLMethod(ABC):
         best checkpoint по F1. Возвращает {"best_f1": float, "best_metrics": dict}.
         """
         labeled_loader, unlabeled_loader = self._build_default_loaders(data, loader_factory)
-        test_loader = self.build_eval_loader(data, loader_factory)
+        selection_loader = self.build_val_loader(data, loader_factory)
 
         best_f1 = 0.0
         best_metrics = None
@@ -72,9 +77,9 @@ class SSLMethod(ABC):
             log_fn(f"Epoch {epoch}/{epochs} | {stats_str}")
 
             if epoch % eval_every == 0 or epoch == epochs:
-                metrics = self.evaluate(test_loader)
+                metrics = self.evaluate(selection_loader)
                 log_fn(
-                    f"  [Eval] Acc={metrics['accuracy']*100:.2f}% "
+                    f"  [Val] Acc={metrics['accuracy']*100:.2f}% "
                     f"Prec={metrics['precision']*100:.2f}% "
                     f"Recall={metrics['recall']*100:.2f}% "
                     f"F1={metrics['f1']*100:.2f}%"

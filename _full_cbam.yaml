@@ -33,7 +33,7 @@ train:
   optimizer: "adam"
   weight_decay: 0.0
   device: "auto"              # auto (cuda -> mps -> cpu) | cuda | mps | cpu
-  num_workers: 4
+  num_workers: 0
 
 eval:
   metrics: ["accuracy", "precision", "recall", "f1"]

@@ -30,10 +30,11 @@ method:
   class_alpha: 1.5       # alpha в w_c=1/log(alpha+pi_c); статья: "alpha > 1", точное значение не дано
   mmd_c: null              # null -> эвристика c=2*latent_dim (Tolstikhin et al. 2018); статья не задаёт c явно
   grad_clip_norm: 1.0        # статья: "gradient clipping with a maximum l2-norm of 1.0"
+  early_stopping_patience: 30  # статья: validation accuracy, patience 30
 
 train:
   batch_size: 256    # статья: batch size = 256
-  epochs: 100          # статья: "maximum training epochs are set to 100" (early stopping не реализован, см. допущения)
+  epochs: 100          # статья: максимум 100, early stopping по validation accuracy
   lr: 0.0005             # статья: initial learning rate 5e-4
   optimizer: "adam"        # статья: Adam (не AdamW)
   weight_decay: 0.00001     # статья: weight decay 1e-5

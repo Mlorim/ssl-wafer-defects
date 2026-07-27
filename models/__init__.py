@@ -14,6 +14,7 @@ from .cbam import CBAM, ChannelAttention, SpatialAttention, CBAMCNNClassifier
 from .cae import WaferCAE
 from .hybrid_vit import ResidualBlock, HybridCNNViT
 from .mm_wae import MMWAE, SpatialBranch, FrequencyBranch, TextureBranch, MultimodalFusion, MMWAEDecoder, MultimodalClassifier
+from .efficient_cnn import EfficientWaferCNN
 from .registry import MODEL_REGISTRY, build_model
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "MultimodalFusion",
     "MMWAEDecoder",
     "MultimodalClassifier",
+    "EfficientWaferCNN",
     "MODEL_REGISTRY",
     "build_model",
 ]

@@ -117,7 +117,13 @@ def inverse_sqrt_class_weights(labels: torch.Tensor, num_classes: int) -> torch.
 
 def imq_kernel(x: torch.Tensor, y: torch.Tensor, c: float) -> torch.Tensor:
     """Inverse multiquadratic kernel k(u,v) = c / (c + ||u-v||^2), см. MM-WAE, раздел 3.4.2."""
-    dist_sq = torch.cdist(x, y, p=2).pow(2)
+    # Equivalent to torch.cdist(...).pow(2), but its backward pass is
+    # implemented consistently on CPU, CUDA and Apple MPS.
+    dist_sq = (
+        x.pow(2).sum(dim=1, keepdim=True)
+        + y.pow(2).sum(dim=1).unsqueeze(0)
+        - 2.0 * x @ y.T
+    ).clamp_min(0.0)
     return c / (c + dist_sq)
 
 

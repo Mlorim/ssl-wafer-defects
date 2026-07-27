@@ -1,73 +1,73 @@
 {
-  "cbam_cnn": {
+  "efficient_cnn": {
     "overall_metrics": {
-      "accuracy": 0.004878048780487805,
-      "precision": 0.0006097560975609756,
-      "recall": 0.125,
-      "f1": 0.0012135922330097086
+      "accuracy": 0.85,
+      "precision": 0.09444444444444444,
+      "recall": 0.1111111111111111,
+      "f1": 0.1021021021021021
     },
     "per_class_metrics": {
       "Center": {
-        "accuracy": 0.9937282229965156,
+        "accuracy": 0.9777777777777777,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Donut": {
-        "accuracy": 1.0,
+        "accuracy": 0.9944444444444445,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Edge-Loc": {
-        "accuracy": 0.9794425087108014,
+        "accuracy": 0.9722222222222222,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Edge-Ring": {
-        "accuracy": 0.9979094076655052,
+        "accuracy": 0.9444444444444444,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Loc": {
-        "accuracy": 0.9794425087108014,
+        "accuracy": 0.9777777777777777,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Near-full": {
-        "accuracy": 0.9989547038327526,
+        "accuracy": 0.9944444444444445,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Random": {
-        "accuracy": 0.9951219512195122,
+        "accuracy": 0.9944444444444445,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
       },
       "Scratch": {
-        "accuracy": 0.004878048780487805,
-        "precision": 0.004878048780487805,
-        "recall": 1.0,
-        "f1": 0.009708737864077669
-      },
-      "None": {
-        "accuracy": 0.060278745644599306,
+        "accuracy": 0.9944444444444445,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0
+      },
+      "None": {
+        "accuracy": 0.85,
+        "precision": 0.85,
+        "recall": 1.0,
+        "f1": 0.918918918918919
       }
     },
     "paper_metrics": {
-      "accuracy": 0.9988,
-      "precision": 0.9956,
-      "recall": 0.99,
-      "f1": 0.9983
+      "accuracy": 0.98,
+      "precision": 0.909,
+      "recall": 0.885,
+      "f1": 0.895
     },
-    "epochs_trained": 2
+    "epochs_trained": 1
   }
 }

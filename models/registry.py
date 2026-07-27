@@ -13,6 +13,7 @@ from .classifiers import WaferClassifier, WaferContrastiveModel, LatentFusionCla
 from .cbam import CBAMCNNClassifier
 from .hybrid_vit import HybridCNNViT
 from .mm_wae import MMWAE
+from .efficient_cnn import EfficientWaferCNN
 
 
 def _build_baseline(num_classes: int, config: dict) -> nn.Module:
@@ -83,6 +84,13 @@ def _build_mm_wae(num_classes: int, config: dict) -> nn.Module:
     )
 
 
+def _build_efficient_cnn(num_classes: int, config: dict) -> nn.Module:
+    return EfficientWaferCNN(
+        backbone=config.get("backbone", "mobilenet_v3_small"),
+        num_classes=num_classes,
+    )
+
+
 MODEL_REGISTRY: Dict[str, Callable[[int, dict], nn.Module]] = {
     "baseline": _build_baseline,
     "mean_teacher": _build_baseline,
@@ -92,6 +100,7 @@ MODEL_REGISTRY: Dict[str, Callable[[int, dict], nn.Module]] = {
     "cbam_cnn": _build_cbam_cnn,
     "hybrid_cnn_vit": _build_hybrid_cnn_vit,
     "mm_wae": _build_mm_wae,
+    "efficient_cnn": _build_efficient_cnn,
 }
 
 

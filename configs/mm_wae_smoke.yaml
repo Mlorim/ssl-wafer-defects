@@ -8,6 +8,7 @@ dataset:
   resize_to: 32
   pixel_range: [-1.0, 1.0]
   labeled_ratio: 0.10
+  unlabeled_pool_size: 500
   balance_method: "none"
   seed: 42
 
@@ -30,6 +31,7 @@ method:
   class_alpha: 1.5
   mmd_c: null
   grad_clip_norm: 1.0
+  early_stopping_patience: 30
 
 train:
   batch_size: 32

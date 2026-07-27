@@ -12,6 +12,8 @@ Labeled батчи: все 4 loss-компонента (L_recon + λ_mmd·L_mmd 
 статьи: "without relying on potentially erroneous pseudo-labels").
 """
 
+import copy
+import os
 from typing import Optional
 
 import torch
@@ -43,6 +45,7 @@ class MMWAEMethod(SSLMethod):
         self.class_alpha = method_cfg.get("class_alpha", 1.5)
         self.mmd_c = method_cfg.get("mmd_c", None)
         self.grad_clip_norm = method_cfg.get("grad_clip_norm", 1.0)
+        self.early_stopping_patience = method_cfg.get("early_stopping_patience", 30)
 
     def _build_default_loaders(self, data: dict, loader_factory):
         """
@@ -52,8 +55,13 @@ class MMWAEMethod(SSLMethod):
         существующий для VAE-претрейна LatentVectorMethod.
         """
         labeled_loader = loader_factory.labeled_loader(
-            data["labeled_images"], data["labeled_labels"], transform_mode="weak"
+            data["labeled_images"], data["labeled_labels"], transform_mode="none"
         )
+        self.class_weights = class_frequency_weights(
+            torch.as_tensor(data["labeled_labels"]),
+            self.num_classes,
+            alpha=self.class_alpha,
+        ).to(self.device)
         unlabeled_loader = None
         if len(data["unlabeled_images"]) > 0:
             unlabeled_loader = loader_factory.raw_pool_loader(data["unlabeled_images"])
@@ -66,7 +74,10 @@ class MMWAEMethod(SSLMethod):
 
         labeled_iter = iter(labeled_loader)
         unlabeled_iter = iter(unlabeled_loader) if unlabeled_loader is not None else None
-        n_steps = len(labeled_loader)
+        n_steps = max(
+            len(labeled_loader),
+            len(unlabeled_loader) if unlabeled_loader is not None else 0,
+        )
 
         for _ in range(n_steps):
             try:
@@ -82,8 +93,9 @@ class MMWAEMethod(SSLMethod):
             recon_loss = F.l1_loss(recon, images)
             mmd = mmd_loss(z, z_prior, c=self.mmd_c)
 
-            weights = class_frequency_weights(labels, self.num_classes, alpha=self.class_alpha).to(self.device)
-            cls_loss = F.cross_entropy(logits, labels, weight=weights)
+            cls_loss = F.cross_entropy(
+                logits, labels, weight=self.class_weights
+            )
             cons_loss = modality_consistency_loss(gate_weights, branch_weights)
 
             loss = recon_loss + self.lambda_mmd * mmd + self.lambda_cls * cls_loss + self.lambda_cons * cons_loss
@@ -126,6 +138,58 @@ class MMWAEMethod(SSLMethod):
             "mmd_loss": total_mmd / max(n_batches, 1),
             "cls_loss": total_cls / max(n_batches, 1),
             "cons_loss": total_cons / max(n_batches, 1),
+        }
+
+    def fit(
+        self, data: dict, loader_factory, epochs: int, eval_every: int,
+        checkpoint_path: str, log_fn=print,
+    ) -> dict:
+        """Paper protocol: validation-accuracy selection, patience 30."""
+        labeled_loader, unlabeled_loader = self._build_default_loaders(data, loader_factory)
+        val_loader = self.build_val_loader(data, loader_factory)
+        checkpoint_dir = os.path.dirname(checkpoint_path)
+        if checkpoint_dir:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+
+        best_accuracy = -1.0
+        best_metrics = None
+        best_state = None
+        best_epoch = 0
+        stale_epochs = 0
+
+        for epoch in range(1, epochs + 1):
+            stats = self.train_epoch(labeled_loader, unlabeled_loader)
+            stats_str = ", ".join(f"{key}={value:.4f}" for key, value in stats.items())
+            log_fn(f"Epoch {epoch}/{epochs} | {stats_str}")
+
+            metrics = self.evaluate(val_loader)
+            log_fn(
+                f"  [Val] Acc={metrics['accuracy']*100:.2f}% "
+                f"Prec={metrics['precision']*100:.2f}% "
+                f"Recall={metrics['recall']*100:.2f}% "
+                f"F1={metrics['f1']*100:.2f}%"
+            )
+            if metrics["accuracy"] > best_accuracy:
+                best_accuracy = metrics["accuracy"]
+                best_metrics = metrics
+                best_epoch = epoch
+                best_state = copy.deepcopy(self.state_dict())
+                torch.save(best_state, checkpoint_path)
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if stale_epochs >= self.early_stopping_patience:
+                    log_fn(
+                        f"Early stopping at epoch {epoch}; "
+                        f"best validation accuracy was at epoch {best_epoch}"
+                    )
+                    break
+
+        self.load_state_dict(best_state)
+        return {
+            "best_f1": best_metrics["f1"],
+            "best_metrics": best_metrics,
+            "optimal_epochs": best_epoch,
         }
 
     @torch.no_grad()

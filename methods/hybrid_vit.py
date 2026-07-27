@@ -22,6 +22,7 @@ Weighted cross-entropy (формула 14, w_c = 1/sqrt(n_c)) используе
 этапа (не за батч — иначе оценка n_c была бы слишком шумной на маленьких батчах).
 """
 
+import copy
 import os
 
 import numpy as np
@@ -65,15 +66,23 @@ class HybridCNNViTMethod(SSLMethod):
         self.stage1_epochs = method_cfg.get("stage1_epochs", 15)
         self.stage2_epochs = method_cfg.get("stage2_epochs", 15)
         self.stage3_epochs = method_cfg.get("stage3_epochs", 20)
+        self.stage1_lr = method_cfg.get("stage1_lr")
+        self.stage2_lr = method_cfg.get("stage2_lr")
+        self.stage3_lr = method_cfg.get("stage3_lr")
         self.mc_samples = method_cfg.get("mc_samples", 20)
+        self.mc_chunk_size = method_cfg.get("mc_chunk_size", 4)
         self.tau_base = method_cfg.get("tau_base", 0.94)
         self.alpha = method_cfg.get("alpha", 0.08)
         self.beta = method_cfg.get("beta", 0.02)
         self.eps_entropy = method_cfg.get("eps_entropy", 0.08)
         self.eps_mi = method_cfg.get("eps_mi", 0.12)
+        self.stage_diagnostics = []
 
     def build_eval_loader(self, data: dict, loader_factory):
         return loader_factory.onehot_eval_loader(data["test_images"], data["test_labels"])
+
+    def build_val_loader(self, data: dict, loader_factory):
+        return loader_factory.onehot_eval_loader(data["val_images"], data["val_labels"])
 
     # ---- MC-Dropout инференс: mean prob, predictive entropy, mutual information ----
 
@@ -84,9 +93,17 @@ class HybridCNNViTMethod(SSLMethod):
 
         for images in loader:
             images = images.to(self.device)
-            probs_samples = torch.stack(
-                [F.softmax(self.model(images), dim=1) for _ in range(self.mc_samples)], dim=0
-            )  # [M, B, C]
+            sample_chunks = []
+            remaining = self.mc_samples
+            while remaining:
+                chunk_size = min(self.mc_chunk_size, remaining)
+                repeated = images.repeat((chunk_size, 1, 1, 1))
+                chunk_probs = F.softmax(self.model(repeated), dim=1)
+                sample_chunks.append(
+                    chunk_probs.reshape(chunk_size, images.shape[0], -1)
+                )
+                remaining -= chunk_size
+            probs_samples = torch.cat(sample_chunks, dim=0)  # [M, B, C]
             mean_probs = probs_samples.mean(dim=0)  # [B, C], формула (5)
             entropy = -(mean_probs * torch.log(mean_probs.clamp(min=1e-12))).sum(dim=1)  # формула (11)
             sample_entropy = -(probs_samples * torch.log(probs_samples.clamp(min=1e-12))).sum(dim=2)  # [M, B]
@@ -131,17 +148,36 @@ class HybridCNNViTMethod(SSLMethod):
 
         accept_mask = (q >= threshold) & (entropy < self.eps_entropy) & (mi < self.eps_mi)
         accept_rate = accept_mask.mean() if len(accept_mask) else 0.0
+        accepted_counts = np.bincount(y_hat[accept_mask], minlength=self.num_classes)
+        candidate_counts = np.bincount(y_hat, minlength=self.num_classes)
+        diagnostics = {
+            "stage": stage,
+            "accepted": int(accept_mask.sum()),
+            "total": int(len(accept_mask)),
+            "accept_rate": float(accept_rate),
+            "candidate_counts": candidate_counts.tolist(),
+            "accepted_counts": accepted_counts.tolist(),
+            "mean_confidence": float(q.mean()),
+            "mean_accepted_confidence": (
+                float(q[accept_mask].mean()) if accept_mask.any() else None
+            ),
+            "mean_entropy": float(entropy.mean()),
+            "mean_mi": float(mi.mean()),
+        }
+        self.stage_diagnostics.append(diagnostics)
         log_fn(
             f"[Stage {stage}] pseudo-labeling: accepted {int(accept_mask.sum())}/{len(accept_mask)} "
-            f"({accept_rate * 100:.2f}%)"
+            f"({accept_rate * 100:.2f}%), per class={accepted_counts.tolist()}, "
+            f"mean confidence={diagnostics['mean_confidence']:.4f}"
         )
         return unlabeled_images[accept_mask], y_hat[accept_mask]
 
     # ---- Обучение одного этапа (supervised warm-up ИЛИ labeled+pseudo) ----
 
     def _train_stage(
-        self, images: np.ndarray, labels: np.ndarray, test_loader, epochs: int, eval_every: int,
-        checkpoint_path: str, best_f1: float, best_metrics, log_fn, loader_factory, stage_name: str,
+        self, images: np.ndarray, labels: np.ndarray, val_loader, epochs: int, eval_every: int,
+        best_f1: float, best_metrics, log_fn, loader_factory, stage_name: str,
+        lr_override=None,
     ):
         loader = loader_factory.onehot_loader(images, labels, transform_mode="weak")
         # веса считаются один раз из состава ВСЕГО обучающего набора этапа
@@ -150,7 +186,12 @@ class HybridCNNViTMethod(SSLMethod):
             torch.as_tensor(labels, dtype=torch.long), self.num_classes
         ).to(self.device)
 
-        optimizer = self.optimizer_factory(self.model.parameters())
+        optimizer = self.optimizer_factory(
+            self.model.parameters(), lr_override=lr_override
+        )
+        stage_best_f1 = -1.0
+        stage_best_metrics = None
+        stage_best_state = None
 
         for epoch in range(1, epochs + 1):
             self.model.train()
@@ -170,9 +211,9 @@ class HybridCNNViTMethod(SSLMethod):
             log_fn(f"[{stage_name}] Epoch {epoch}/{epochs} | loss={total_loss / max(n_batches, 1):.4f}")
 
             if epoch % eval_every == 0 or epoch == epochs:
-                metrics = self.evaluate(test_loader)
+                metrics = self.evaluate(val_loader)
                 log_fn(
-                    f"  [Eval] Acc={metrics['accuracy']*100:.2f}% "
+                    f"  [Val] Acc={metrics['accuracy']*100:.2f}% "
                     f"Prec={metrics['precision']*100:.2f}% "
                     f"Recall={metrics['recall']*100:.2f}% "
                     f"F1={metrics['f1']*100:.2f}%"
@@ -180,9 +221,21 @@ class HybridCNNViTMethod(SSLMethod):
                 if metrics["f1"] > best_f1:
                     best_f1 = metrics["f1"]
                     best_metrics = metrics
-                    torch.save(self.state_dict(), checkpoint_path)
+                if metrics["f1"] > stage_best_f1:
+                    stage_best_f1 = metrics["f1"]
+                    stage_best_metrics = metrics
+                    # The next stage must use the best teacher from this stage,
+                    # not merely the weights left by its final epoch.
+                    stage_best_state = copy.deepcopy(self.state_dict())
 
-        return best_f1, best_metrics
+        if stage_best_state is None:
+            raise RuntimeError(f"{stage_name}: validation was never evaluated")
+        self.load_state_dict(stage_best_state)
+        log_fn(
+            f"[{stage_name}] restored best teacher | "
+            f"Val F1={stage_best_metrics['f1']*100:.2f}%"
+        )
+        return best_f1, best_metrics, stage_best_state
 
     # ---- fit(): 3-этапный цикл ----
 
@@ -191,16 +244,26 @@ class HybridCNNViTMethod(SSLMethod):
         if checkpoint_dir:
             os.makedirs(checkpoint_dir, exist_ok=True)
 
-        test_loader = self.build_eval_loader(data, loader_factory)
+        # выбор чекпоинтов — по validation-сплиту (как в статье, секция 4.1);
+        # test НЕ участвует в model selection, иначе это утечка test в обучение
+        val_loader = self.build_val_loader(data, loader_factory)
         best_f1, best_metrics = 0.0, None
+        global_best_state = None
+        self.stage_diagnostics = []
 
         # Stage 1: supervised warm-up на Dl
-        best_f1, best_metrics = self._train_stage(
-            data["labeled_images"], data["labeled_labels"], test_loader,
-            epochs=self.stage1_epochs, eval_every=eval_every, checkpoint_path=checkpoint_path,
+        previous_best_f1 = best_f1
+        best_f1, best_metrics, stage_state = self._train_stage(
+            data["labeled_images"], data["labeled_labels"], val_loader,
+            epochs=self.stage1_epochs, eval_every=eval_every,
             best_f1=best_f1, best_metrics=best_metrics, log_fn=log_fn,
             loader_factory=loader_factory, stage_name="Stage 1 (supervised)",
+            lr_override=self.stage1_lr,
         )
+        if best_f1 > previous_best_f1:
+            global_best_state = copy.deepcopy(stage_state)
+        self.load_state_dict(global_best_state)
+        torch.save(global_best_state, checkpoint_path)
 
         # Stage 2: MC-Dropout псевдо-разметка teacher'ом из Stage 1, Dl ∪ Dpseudo(2)
         pseudo_images, pseudo_labels = self._select_pseudo_labels(
@@ -208,12 +271,20 @@ class HybridCNNViTMethod(SSLMethod):
         )
         stage2_images = np.concatenate([data["labeled_images"], pseudo_images]) if len(pseudo_images) else data["labeled_images"]
         stage2_labels = np.concatenate([data["labeled_labels"], pseudo_labels]) if len(pseudo_images) else data["labeled_labels"]
-        best_f1, best_metrics = self._train_stage(
-            stage2_images, stage2_labels, test_loader,
-            epochs=self.stage2_epochs, eval_every=eval_every, checkpoint_path=checkpoint_path,
+        previous_best_f1 = best_f1
+        best_f1, best_metrics, stage_state = self._train_stage(
+            stage2_images, stage2_labels, val_loader,
+            epochs=self.stage2_epochs, eval_every=eval_every,
             best_f1=best_f1, best_metrics=best_metrics, log_fn=log_fn,
             loader_factory=loader_factory, stage_name="Stage 2 (+ pseudo-labels)",
+            lr_override=self.stage2_lr,
         )
+        if best_f1 > previous_best_f1:
+            global_best_state = copy.deepcopy(stage_state)
+        else:
+            log_fn("[Stage 2] no validation improvement; rolling back teacher")
+        self.load_state_dict(global_best_state)
+        torch.save(global_best_state, checkpoint_path)
 
         # Stage 3: teacher — модель после Stage 2; псевдо-метки пересчитываются
         # заново (заменяют Stage 2's набор, а не объединяются с ним), Dl ∪ Dpseudo(3)
@@ -222,14 +293,29 @@ class HybridCNNViTMethod(SSLMethod):
         )
         stage3_images = np.concatenate([data["labeled_images"], pseudo_images]) if len(pseudo_images) else data["labeled_images"]
         stage3_labels = np.concatenate([data["labeled_labels"], pseudo_labels]) if len(pseudo_images) else data["labeled_labels"]
-        best_f1, best_metrics = self._train_stage(
-            stage3_images, stage3_labels, test_loader,
-            epochs=self.stage3_epochs, eval_every=eval_every, checkpoint_path=checkpoint_path,
+        previous_best_f1 = best_f1
+        best_f1, best_metrics, stage_state = self._train_stage(
+            stage3_images, stage3_labels, val_loader,
+            epochs=self.stage3_epochs, eval_every=eval_every,
             best_f1=best_f1, best_metrics=best_metrics, log_fn=log_fn,
             loader_factory=loader_factory, stage_name="Stage 3 (refreshed pseudo-labels)",
+            lr_override=self.stage3_lr,
         )
+        if best_f1 > previous_best_f1:
+            global_best_state = copy.deepcopy(stage_state)
+        else:
+            log_fn("[Stage 3] no validation improvement; keeping previous best model")
 
-        return {"best_f1": best_f1, "best_metrics": best_metrics}
+        if global_best_state is None:
+            global_best_state = copy.deepcopy(stage_state)
+        self.load_state_dict(global_best_state)
+        torch.save(global_best_state, checkpoint_path)
+
+        return {
+            "best_f1": best_f1,
+            "best_metrics": best_metrics,
+            "pseudo_label_diagnostics": self.stage_diagnostics,
+        }
 
     # ---- eval / checkpoint interface ----
 

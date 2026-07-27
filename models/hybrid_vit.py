@@ -103,8 +103,10 @@ class HybridCNNViT(nn.Module):
             dropout=transformer_dropout,
             activation="gelu",
             batch_first=True,
+            norm_first=True,
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.norm = nn.LayerNorm(embed_dim)
 
         self.head = nn.Linear(embed_dim, num_classes)
 
@@ -122,6 +124,6 @@ class HybridCNNViT(nn.Module):
         tokens = torch.cat([cls_tokens, tokens], dim=1)  # [B, N+1, D]
         tokens = self.pre_transformer_dropout(tokens)
 
-        encoded = self.transformer(tokens)
+        encoded = self.norm(self.transformer(tokens))
         cls_out = encoded[:, 0]  # class token
         return self.head(cls_out)

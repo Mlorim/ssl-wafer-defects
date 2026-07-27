@@ -12,6 +12,7 @@ train.py
     python train.py --config configs/cbam_cnn.yaml --method cbam_cnn
     python train.py --config configs/hybrid_cnn_vit.yaml --method hybrid_cnn_vit
     python train.py --config configs/mm_wae.yaml --method mm_wae
+    python train.py --config configs/efficient_cnn.yaml --method efficient_cnn
 
 Флаг --method переопределяет method.name из конфига. Список допустимых
 значений берётся из METHOD_REGISTRY — при добавлении нового метода (новый
@@ -116,11 +117,17 @@ def main():
 
     print("Подготовка данных...")
     data = prepare_data_for_method(method_name, config, seed)
-    print(
-        f"Labeled: {len(data['labeled_images'])}, "
-        f"Unlabeled: {len(data['unlabeled_images'])}, "
-        f"Test: {len(data['test_images'])}"
-    )
+    if method_name == "efficient_cnn":
+        print(
+            f"Development: {len(data['development_indices'])}, "
+            f"Test: {len(data['test_indices'])}"
+        )
+    else:
+        print(
+            f"Labeled: {len(data['labeled_images'])}, "
+            f"Unlabeled: {len(data['unlabeled_images'])}, "
+            f"Test: {len(data['test_images'])}"
+        )
 
     model = build_model(method_name, num_classes=NUM_CLASSES, config=config["model"])
     optimizer_factory = make_optimizer_factory(config["train"])
@@ -157,14 +164,18 @@ def main():
         compare_to_paper(final_metrics, paper_result)
 
     os.makedirs(config["output"]["results_dir"], exist_ok=True)
+    result_payload = {
+        "overall_metrics": final_metrics,
+        "per_class_metrics": report,
+        "paper_metrics": paper_result,
+        "epochs_trained": config["train"]["epochs"],
+    }
+    if result.get("pseudo_label_diagnostics") is not None:
+        result_payload["pseudo_label_diagnostics"] = result["pseudo_label_diagnostics"]
+
     update_results(
         method_name,
-        {
-            "overall_metrics": final_metrics,
-            "per_class_metrics": report,
-            "paper_metrics": paper_result,
-            "epochs_trained": config["train"]["epochs"],
-        },
+        result_payload,
         config["output"]["results_path"],
     )
 

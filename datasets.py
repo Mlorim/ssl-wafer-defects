@@ -21,6 +21,10 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
+from sklearn.model_selection import train_test_split
+from PIL import Image
+from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 
 def _patch_legacy_pandas_modules():
@@ -58,10 +62,11 @@ def _patch_legacy_pandas_modules():
             continue
 
 try:
-    from imblearn.over_sampling import SMOTE
+    from imblearn.over_sampling import RandomOverSampler, SMOTE
     from imblearn.under_sampling import RandomUnderSampler
 except ImportError:
     SMOTE = None
+    RandomOverSampler = None
     RandomUnderSampler = None
 
 
@@ -126,6 +131,32 @@ def _parse_label(failure_type) -> Optional[str]:
     return None
 
 
+def _parse_partition(trian_test_label) -> Optional[str]:
+    """
+    Извлекает официальный train/test сплит WM-811K из поля 'trianTestLabel'
+    строки LSWMD.pkl (значения вида 'Training'/'Test', обычно вложены в
+    numpy array, как и failureType). Возвращает 'train'/'test' или None,
+    если поле пустое/не распознано.
+    """
+    value_str = None
+    if trian_test_label is not None:
+        if isinstance(trian_test_label, (list, np.ndarray)):
+            flat = np.array(trian_test_label).flatten()
+            if len(flat) > 0 and flat[0] not in (None, ""):
+                value_str = str(flat[0])
+        elif isinstance(trian_test_label, str) and trian_test_label != "":
+            value_str = trian_test_label
+
+    if value_str is None:
+        return None
+    value_lower = value_str.strip().lower()
+    if value_lower.startswith("train"):
+        return "train"
+    if value_lower.startswith("test"):
+        return "test"
+    return None
+
+
 def load_wm811k(
     path: str,
     only_labeled: bool = False,
@@ -133,6 +164,7 @@ def load_wm811k(
     resize_to: int = WAFER_SIZE,
     one_hot: bool = False,
     pixel_range: Tuple[float, float] = (0.0, 1.0),
+    return_partition: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Загружает WM-811K из .pkl файла (LSWMD.pkl формат).
@@ -145,11 +177,16 @@ def load_wm811k(
     one-hot кодируется ДО неё, чтобы не терять категориальность значений;
     ресайз всё равно nearest-neighbor (_resize_wafer), поэтому категории
     остаются целыми {0,1,2} и после ресайза.
+    return_partition=True: дополнительно возвращает официальный train/test
+    сплит WM-811K (колонка 'trianTestLabel', см. _parse_partition) — статья
+    SemiWaferNet использует именно его, а не случайный сплит.
 
     Returns:
         images: np.ndarray, см. выше
         labels: np.ndarray [N] int64, -1 для unlabeled образцов
         is_labeled: np.ndarray [N] bool
+        partition (только при return_partition=True): np.ndarray [N] object,
+            'train'/'test'/None
     """
     if not os.path.exists(path):
         raise FileNotFoundError(
@@ -168,6 +205,7 @@ def load_wm811k(
     images_list = []
     labels_list = []
     is_labeled_list = []
+    partition_list = []
 
     for _, row in df.iterrows():
         wafer_map = row["waferMap"]
@@ -208,6 +246,8 @@ def load_wm811k(
         images_list.append(image)
         labels_list.append(label)
         is_labeled_list.append(labeled)
+        if return_partition:
+            partition_list.append(_parse_partition(row.get("trianTestLabel", None)))
 
         if max_samples is not None and len(images_list) >= max_samples:
             break
@@ -216,7 +256,97 @@ def load_wm811k(
     labels = np.array(labels_list, dtype=np.int64)
     is_labeled = np.array(is_labeled_list, dtype=bool)
 
+    if return_partition:
+        partition = np.array(partition_list, dtype=object)
+        return images, labels, is_labeled, partition
     return images, labels, is_labeled
+
+
+def load_wm811k_raw_labeled(path: str):
+    """Load labeled native-size maps without materializing resized images."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Не найден файл датасета: {path}")
+    _patch_legacy_pandas_modules()
+    with open(path, "rb") as stream:
+        df = pickle.load(stream, encoding="latin1")
+    wafer_maps, labels = [], []
+    for _, row in df.iterrows():
+        label_key = _parse_label(row.get("failureType", None))
+        if label_key is None:
+            continue
+        wafer_maps.append(np.asarray(row["waferMap"], dtype=np.uint8))
+        labels.append(CLASS_TO_IDX[label_key])
+    return wafer_maps, np.asarray(labels, dtype=np.int64)
+
+
+class EfficientWaferDataset(Dataset):
+    """On-the-fly 3-channel 224x224 preprocessing for lightweight CNNs."""
+
+    def __init__(
+        self,
+        wafer_maps,
+        labels,
+        indices,
+        train: bool,
+        image_size: int = 224,
+        rotation_degrees: float = 180.0,
+        transform_probability: float = 0.5,
+    ):
+        self.wafer_maps = wafer_maps
+        self.labels = labels
+        self.indices = np.asarray(indices, dtype=np.int64)
+        common_tail = [
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3),
+        ]
+        if train:
+            self.transform = transforms.Compose(
+                [
+                    transforms.Resize(
+                        image_size + 32, interpolation=InterpolationMode.NEAREST
+                    ),
+                    transforms.RandomCrop(image_size),
+                    transforms.RandomRotation(
+                        rotation_degrees,
+                        interpolation=InterpolationMode.NEAREST,
+                        fill=0,
+                    ),
+                    transforms.RandomHorizontalFlip(p=transform_probability),
+                    transforms.RandomVerticalFlip(p=transform_probability),
+                    transforms.RandomApply(
+                        [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))],
+                        p=transform_probability,
+                    ),
+                    *common_tail,
+                    transforms.RandomErasing(
+                        p=transform_probability, scale=(0.02, 0.15), value=0
+                    ),
+                ]
+            )
+        else:
+            self.transform = transforms.Compose(
+                [
+                    transforms.Resize(
+                        (image_size, image_size),
+                        interpolation=InterpolationMode.NEAREST,
+                    ),
+                    *common_tail,
+                ]
+            )
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, item):
+        index = int(self.indices[item])
+        # Native values are {0,1,2}; stretch them across uint8 before ToTensor.
+        image = Image.fromarray(
+            np.rint(self.wafer_maps[index].astype(np.float32) * 127.5).astype(
+                np.uint8
+            ),
+            mode="L",
+        ).convert("RGB")
+        return self.transform(image), int(self.labels[index])
 
 
 def split_labeled_unlabeled(
@@ -251,16 +381,40 @@ def split_labeled_unlabeled(
     return images, labels_split, is_labeled_mask
 
 
+def _binarize_onehot(images: np.ndarray) -> np.ndarray:
+    """
+    Приводит мягкие многоканальные wafer-карты обратно к one-hot: в каждом
+    пикселе побеждает канал с максимальным значением, остальные обнуляются.
+    Для выходов SMOTE над one-hot векторами это точная операция: выпуклая
+    комбинация one-hot строк сохраняет сумму 1, поэтому argmax восстанавливает
+    валидный one-hot (канал с наибольшим весом) вместо «призрачных»
+    полутоновых интерполяций, которых нет в реальном распределении.
+    Вход: [..., C] (последняя ось — каналы). Выход: та же форма, {0, 1}.
+    """
+    flat = images.reshape(-1, images.shape[-1])
+    out = np.zeros_like(flat)
+    out[np.arange(len(flat)), flat.argmax(axis=1)] = 1.0
+    return out.reshape(images.shape).astype(np.float32)
+
+
 def _hybrid_balance(
     images: np.ndarray,
     labels: np.ndarray,
     target_per_class: int,
     seed: int,
+    binarize_onehot: bool = False,
+    oversampler: str = "smote",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    "Hybrid sampling" из статьи SemiWaferNet: downsampling мажоритарных
-    классов (в основном "None") до target_per_class, затем SMOTE-oversampling
-    оставшихся миноритарных классов до того же target_per_class.
+    Hybrid sampling: downsampling мажоритарных классов (в основном "None")
+    до target_per_class, затем oversampling миноритарных классов до той же
+    численности. ``oversampler="random"`` безопасен для категориальных wafer
+    maps; ``"smote"`` оставлен для точного экспериментального сравнения.
+
+    binarize_onehot=True: после SMOTE бинаризует синтетические сэмплы обратно
+    в one-hot (_binarize_onehot) — включать только когда images являются
+    one-hot [H,W,3] (пайплайн HybridCNN-ViT). SMOTE-интерполяции иначе дают
+    полутоновые «призрачные» карты, которых нет в тестовом распределении.
     """
     if SMOTE is None:
         raise ImportError(
@@ -289,11 +443,24 @@ def _hybrid_balance(
     min_class_size = min(counts[c] for c in minority_classes)
     k_neighbors = max(1, min(5, int(min_class_size) - 1))
     sampling_strategy = {cls: target_per_class for cls in minority_classes}
-    sampler = SMOTE(random_state=seed, k_neighbors=k_neighbors, sampling_strategy=sampling_strategy)
+    if oversampler == "random":
+        sampler = RandomOverSampler(
+            random_state=seed, sampling_strategy=sampling_strategy
+        )
+    elif oversampler == "smote":
+        sampler = SMOTE(
+            random_state=seed,
+            k_neighbors=k_neighbors,
+            sampling_strategy=sampling_strategy,
+        )
+    else:
+        raise ValueError(f"Неизвестный hybrid oversampler: {oversampler}")
 
     flat_resampled, labels_resampled = sampler.fit_resample(flat, labels_ds)
-    images_resampled = flat_resampled.reshape((-1,) + images_ds.shape[1:]).astype(np.float32)
-    return images_resampled, labels_resampled
+    images_resampled = flat_resampled.reshape((-1,) + images_ds.shape[1:])
+    if binarize_onehot:
+        images_resampled = _binarize_onehot(images_resampled)
+    return images_resampled.astype(np.float32), labels_resampled
 
 
 def balance_classes(
@@ -302,6 +469,8 @@ def balance_classes(
     method: str = "smote",
     seed: int = 42,
     target_per_class: Optional[int] = None,
+    binarize_onehot: bool = False,
+    hybrid_oversampler: str = "smote",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Балансировка labeled-части датасета.
@@ -312,12 +481,18 @@ def balance_classes(
         "hybrid"      - downsampling мажоритарных + SMOTE миноритарных до
                          target_per_class (статья SemiWaferNet); требует target_per_class
         "none"        - без изменений
+
+    binarize_onehot: только для method="hybrid" — бинаризовать SMOTE-выход
+    обратно в one-hot (см. _hybrid_balance).
     """
     if method == "none":
         return images, labels
 
     if method == "hybrid":
-        return _hybrid_balance(images, labels, target_per_class=target_per_class or 2000, seed=seed)
+        return _hybrid_balance(
+            images, labels, target_per_class=target_per_class or 2000, seed=seed,
+            binarize_onehot=binarize_onehot, oversampler=hybrid_oversampler,
+        )
 
     if SMOTE is None:
         raise ImportError(
@@ -696,7 +871,10 @@ def _balance_via_cae(
     "None") даунсэмплятся до target_per_class, миноритарные дополняются
     синтетическими образцами через CAE (обучен на всём train-наборе):
     Z = encode(X), Z_noisy = Z + eps (eps ~ N(0, cae_noise_std^2)),
-    X_synth = decode(Z_noisy).
+    X_synth = decode(Z_noisy). Синтетика бинаризуется обратно в one-hot
+    (_binarize_onehot): sigmoid-декодер даёт полутоновые карты, которых нет в
+    реальном распределении (там значения строго one-hot), — бинаризация
+    убирает этот сдвиг между train и test.
 
     Импорт models.WaferCAE — локальный (внутри функции), чтобы не вводить
     жёсткую top-level зависимость datasets.py -> models.py для остальных
@@ -749,6 +927,7 @@ def _balance_via_cae(
                 noise = torch.randn_like(z) * cae_noise_std
                 synthetic = cae.decode(z + noise)
                 synthetic_np = synthetic.permute(0, 2, 3, 1).numpy()
+                synthetic_np = _binarize_onehot(synthetic_np)
 
                 out_images.append(synthetic_np)
                 out_labels.append(np.full(n_needed, cls, dtype=np.int64))
@@ -756,6 +935,36 @@ def _balance_via_cae(
     balanced_images = np.concatenate(out_images).astype(np.float32)
     balanced_labels = np.concatenate(out_labels).astype(np.int64)
     return balanced_images, balanced_labels
+
+
+def _stratified_split(
+    labels: np.ndarray,
+    fractions: List[float],
+    seed: int,
+) -> List[np.ndarray]:
+    """
+    Стратифицированный сплит индексов на len(fractions) частей: по каждому
+    классу (включая встречающиеся 1-2 раза) в каждую часть попадает
+    пропорциональная доля сэмплов (округление вниз, минимум 0). В отличие от
+    случайного сплита по всему массиву, гарантирует присутствие редких
+    классов в каждой части, где это возможно (например, единственный Donut
+    гарантированно окажется в самой большой части — train).
+    """
+    rng = np.random.RandomState(seed)
+    parts = [[] for _ in fractions]
+    for cls in np.unique(labels):
+        cls_idx = np.where(labels == cls)[0]
+        rng.shuffle(cls_idx)
+        start = 0
+        for i, frac in enumerate(fractions):
+            if i == len(fractions) - 1:
+                part = cls_idx[start:]
+            else:
+                k = int(len(cls_idx) * frac)
+                part = cls_idx[start:start + k]
+                start += k
+            parts[i].append(part)
+    return [np.concatenate(p) for p in parts]
 
 
 def prepare_datasets_cbam(
@@ -770,11 +979,14 @@ def prepare_datasets_cbam(
     """
     Пайплайн подготовки данных для CBAM-CNN метода: фильтрация WM-811K до
     нативного разрешения native_size x native_size (без ресайза), one-hot
-    encoding, honest train/val/test split (val_ratio доли — под early
-    stopping/подбор оптимального числа эпох, val не участвует в CAE-аугментации
-    и остаётся в исходном несбалансированном распределении, как test), затем
-    балансировка train-части (downsampling "None" + CAE-аугментация
-    миноритарных до target_per_class, см. _balance_via_cae).
+    encoding, честный стратифицированный train/val/test split (test ~20%,
+    val ~val_ratio; стратификация нужна, потому что в native-26x26 наборе
+    есть классы из 1-31 сэмпла — при случайном сплите они могли вообще не
+    попасть в train). val используется для early stopping/подбора числа эпох,
+    не участвует в CAE-аугментации и, как и test, остаётся в исходном
+    несбалансированном распределении. Балансировка (downsampling "None" +
+    CAE-аугментация миноритарных до target_per_class, см. _balance_via_cae)
+    применяется только к train-части — никакой утечки синтетики в val/test.
 
     Возвращает dict с теми же ключами, что и prepare_datasets(), плюс
     "val_images"/"val_labels"; unlabeled_images — пустой массив, т.к. метод
@@ -783,14 +995,7 @@ def prepare_datasets_cbam(
     set_seed(seed)
     images, labels = load_wm811k_native(data_path, size=native_size)
 
-    rng = np.random.RandomState(seed)
-    n = len(images)
-    perm = rng.permutation(n)
-    test_size = int(n * 0.2)
-    val_size = int(n * val_ratio)
-    test_idx = perm[:test_size]
-    val_idx = perm[test_size:test_size + val_size]
-    train_idx = perm[test_size + val_size:]
+    test_idx, val_idx, train_idx = _stratified_split(labels, [0.2, val_ratio, 1.0], seed=seed)
 
     test_images, test_labels = images[test_idx], labels[test_idx]
     val_images, val_labels = images[val_idx], labels[val_idx]
@@ -818,39 +1023,66 @@ def prepare_datasets_hybrid_vit(
     resize_to: int = 32,
     unlabeled_pool_size: int = 150000,
     balance_target_per_class: int = 2000,
+    balance_oversampler: str = "random",
+    val_ratio: float = 0.1,
+    pseudo_eval_ratio: float = 0.05,
     seed: int = 42,
 ) -> dict:
     """
     Пайплайн подготовки данных для HybridCNN-ViT (статья SemiWaferNet):
     one-hot [H,W,3] представление, ресайз до resize_to (по статье — 32x32).
-    В отличие от prepare_datasets() (которая имитирует scarcity, искусственно
-    скрывая лейблы у части полностью размеченного набора), здесь используется
-    РЕАЛЬНАЯ граница labeled/unlabeled из WM-811K (is_labeled), а unlabeled пул
+
+    Сплит — ОФИЦИАЛЬНЫЙ train/test partition WM-811K (колонка 'trianTestLabel'
+    в LSWMD.pkl), как в статье: "we use the labeled subset together with the
+    official training/test partition provided in WM-811K" (секция 4.1).
+    Validation — стратифицированные val_ratio лейблов из официальной
+    train-части (статья: "A validation subset is further split from the
+    official training portion before any re-sampling is applied"); val, как и
+    test, остаётся в исходном imbalanced распределении и используется для
+    выбора чекпоинтов (без утечки test в model selection).
+
+    Labeled/unlabeled граница — РЕАЛЬНАЯ из WM-811K (is_labeled), unlabeled пул
     подсэмплируется до unlabeled_pool_size (статья: 150 000). Балансировка
-    train-части — "hybrid" (downsampling "None" + SMOTE миноритарных, formula
-    из статьи), validation/test остаются в исходном (imbalanced) распределении.
+    train-части — "hybrid" (downsampling "None" + SMOTE миноритарных, секция
+    4.1 статьи). Интерполированные SMOTE-примеры сохраняются мягкими: argmax
+    после SMOTE почти всегда вырождает интерполяцию в копию одного из двух
+    исходных one-hot изображений и фактически превращает oversampling в
+    дублирование.
     """
     set_seed(seed)
-    images, labels, is_labeled = load_wm811k(data_path, only_labeled=False, resize_to=resize_to, one_hot=True)
+    images, labels, is_labeled, partition = load_wm811k(
+        data_path, only_labeled=False, resize_to=resize_to, one_hot=True, return_partition=True
+    )
 
-    labeled_images_all = images[is_labeled]
-    labeled_labels_all = labels[is_labeled]
-    unlabeled_images_all = images[~is_labeled]
+    labeled_mask = is_labeled
+    official_test_mask = partition == "test"
+    # сэмплы без официальной метки сплита (None в partition) считаем train-частью:
+    # официальный test нам нужен как минимум чистый от train-объектов
+    test_images = images[labeled_mask & official_test_mask]
+    test_labels = labels[labeled_mask & official_test_mask]
+    train_pool_images = images[labeled_mask & ~official_test_mask]
+    train_pool_labels = labels[labeled_mask & ~official_test_mask]
+    unlabeled_images_all = images[~labeled_mask]
 
-    rng = np.random.RandomState(seed)
-    n = len(labeled_images_all)
-    perm = rng.permutation(n)
-    test_size = int(n * 0.2)
-    test_idx, train_idx = perm[:test_size], perm[test_size:]
-
-    test_images, test_labels = labeled_images_all[test_idx], labeled_labels_all[test_idx]
-    train_images, train_labels = labeled_images_all[train_idx], labeled_labels_all[train_idx]
+    # Validation и pseudo-evaluation отделяются ДО resampling. Первый служит
+    # только для model selection, второй — только для проверки/калибровки
+    # pseudo-label selection, поэтому эти роли не смешиваются.
+    val_idx, pseudo_eval_idx, train_idx = _stratified_split(
+        train_pool_labels, [val_ratio, pseudo_eval_ratio, 1.0], seed=seed
+    )
+    val_images, val_labels = train_pool_images[val_idx], train_pool_labels[val_idx]
+    pseudo_eval_images = train_pool_images[pseudo_eval_idx]
+    pseudo_eval_labels = train_pool_labels[pseudo_eval_idx]
+    train_images, train_labels = train_pool_images[train_idx], train_pool_labels[train_idx]
 
     balanced_images, balanced_labels = balance_classes(
-        train_images, train_labels, method="hybrid", seed=seed, target_per_class=balance_target_per_class,
+        train_images, train_labels, method="hybrid", seed=seed,
+        target_per_class=balance_target_per_class, binarize_onehot=False,
+        hybrid_oversampler=balance_oversampler,
     )
 
     if len(unlabeled_images_all) > unlabeled_pool_size:
+        rng = np.random.RandomState(seed)
         chosen = rng.choice(len(unlabeled_images_all), size=unlabeled_pool_size, replace=False)
         unlabeled_images_all = unlabeled_images_all[chosen]
 
@@ -858,8 +1090,84 @@ def prepare_datasets_hybrid_vit(
         "labeled_images": balanced_images,
         "labeled_labels": balanced_labels,
         "unlabeled_images": unlabeled_images_all,
+        "val_images": val_images,
+        "val_labels": val_labels,
+        "pseudo_eval_images": pseudo_eval_images,
+        "pseudo_eval_labels": pseudo_eval_labels,
         "test_images": test_images,
         "test_labels": test_labels,
+    }
+
+
+def prepare_datasets_mm_wae(
+    data_path: str,
+    labeled_ratio: float = 0.10,
+    resize_to: int = 32,
+    pixel_range: Tuple[float, float] = (-1.0, 1.0),
+    unlabeled_pool_size: Optional[int] = None,
+    seed: int = 42,
+) -> dict:
+    """Leakage-safe stratified 70/10/20 protocol from the MM-WAE paper."""
+    set_seed(seed)
+    images, labels, _ = load_wm811k(
+        data_path,
+        only_labeled=True,
+        resize_to=resize_to,
+        pixel_range=pixel_range,
+    )
+    all_idx = np.arange(len(labels))
+    train_val_idx, test_idx = train_test_split(
+        all_idx,
+        test_size=0.20,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels,
+    )
+    train_idx, val_idx = train_test_split(
+        train_val_idx,
+        test_size=0.125,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels[train_val_idx],
+    )
+    labeled_idx, unlabeled_idx = train_test_split(
+        train_idx,
+        train_size=labeled_ratio,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels[train_idx],
+    )
+    if unlabeled_pool_size is not None and len(unlabeled_idx) > unlabeled_pool_size:
+        rng = np.random.RandomState(seed)
+        unlabeled_idx = rng.choice(
+            unlabeled_idx, size=unlabeled_pool_size, replace=False
+        )
+    return {
+        "labeled_images": images[labeled_idx],
+        "labeled_labels": labels[labeled_idx],
+        "unlabeled_images": images[unlabeled_idx],
+        "val_images": images[val_idx],
+        "val_labels": labels[val_idx],
+        "test_images": images[test_idx],
+        "test_labels": labels[test_idx],
+    }
+
+
+def prepare_datasets_efficient_cnn(data_path: str, seed: int = 42) -> dict:
+    wafer_maps, labels = load_wm811k_raw_labeled(data_path)
+    all_indices = np.arange(len(labels))
+    development_indices, test_indices = train_test_split(
+        all_indices,
+        test_size=0.20,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels,
+    )
+    return {
+        "wafer_maps": wafer_maps,
+        "all_labels": labels,
+        "development_indices": np.asarray(development_indices),
+        "test_indices": np.asarray(test_indices),
     }
 
 
@@ -883,6 +1191,9 @@ _DATASET_PIPELINES = {
         resize_to=config["dataset"].get("resize_to", 32),
         unlabeled_pool_size=config["dataset"].get("unlabeled_pool_size", 150000),
         balance_target_per_class=config["dataset"].get("balance_target_per_class", 2000),
+        balance_oversampler=config["dataset"].get("balance_oversampler", "random"),
+        val_ratio=config["dataset"].get("val_ratio", 0.1),
+        pseudo_eval_ratio=config["dataset"].get("pseudo_eval_ratio", 0.05),
         seed=seed,
     ),
     # MM-WAE (Zhang et al.): honest labeled_ratio-split из существующего
@@ -890,13 +1201,17 @@ _DATASET_PIPELINES = {
     # sampling 5%/10%, сохраняющий исходный imbalance, без oversampling —
     # имбаланс компенсируется class-frequency weighted CE самой модели), нужны
     # только другой resize (32x32) и диапазон пикселей ([-1,1] вместо [0,1]).
-    "mm_wae": lambda config, seed: prepare_datasets(
+    "mm_wae": lambda config, seed: prepare_datasets_mm_wae(
         data_path=config["dataset"]["path"],
         labeled_ratio=config["dataset"].get("labeled_ratio", 0.10),
-        balance_method=config["dataset"].get("balance_method", "none"),
         seed=seed,
         resize_to=config["dataset"].get("resize_to", 32),
         pixel_range=tuple(config["dataset"].get("pixel_range", [-1.0, 1.0])),
+        unlabeled_pool_size=config["dataset"].get("unlabeled_pool_size"),
+    ),
+    "efficient_cnn": lambda config, seed: prepare_datasets_efficient_cnn(
+        data_path=config["dataset"]["path"],
+        seed=seed,
     ),
 }
 
@@ -922,6 +1237,7 @@ def prepare_datasets(
     seed: int = 42,
     resize_to: int = WAFER_SIZE,
     pixel_range: Tuple[float, float] = (0.0, 1.0),
+    val_ratio: float = 0.0,
 ) -> dict:
     """
     Полный pipeline подготовки данных под обучение:
@@ -955,6 +1271,19 @@ def prepare_datasets(
     test_images, test_labels = images[test_idx], labels[test_idx]
     train_images, train_labels = images[train_idx], labels[train_idx]
 
+    if val_ratio > 0:
+        val_idx, remaining_idx = _stratified_split(
+            train_labels, [val_ratio, 1.0], seed=seed
+        )
+        val_images, val_labels = train_images[val_idx], train_labels[val_idx]
+        train_images, train_labels = (
+            train_images[remaining_idx],
+            train_labels[remaining_idx],
+        )
+    else:
+        val_images = np.empty((0,) + images.shape[1:], dtype=images.dtype)
+        val_labels = np.empty((0,), dtype=np.int64)
+
     _, train_labels_split, is_labeled_mask = split_labeled_unlabeled(
         train_images, train_labels, labeled_ratio=labeled_ratio, seed=seed
     )
@@ -972,6 +1301,8 @@ def prepare_datasets(
         "labeled_images": labeled_images,
         "labeled_labels": labeled_labels,
         "unlabeled_images": unlabeled_images,
+        "val_images": val_images,
+        "val_labels": val_labels,
         "test_images": test_images,
         "test_labels": test_labels,
     }
