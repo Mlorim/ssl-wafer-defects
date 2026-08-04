@@ -279,6 +279,88 @@ def load_wm811k_raw_labeled(path: str):
     return wafer_maps, np.asarray(labels, dtype=np.int64)
 
 
+def load_wm811k_raw_all(path: str):
+    """Load native-size maps and preserve the real labeled/unlabeled boundary."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Не найден файл датасета: {path}")
+    _patch_legacy_pandas_modules()
+    with open(path, "rb") as stream:
+        df = pickle.load(stream, encoding="latin1")
+    wafer_maps, labels = [], []
+    for _, row in df.iterrows():
+        label_key = _parse_label(row.get("failureType", None))
+        wafer_maps.append(np.asarray(row["waferMap"], dtype=np.uint8))
+        labels.append(CLASS_TO_IDX[label_key] if label_key is not None else -1)
+    return wafer_maps, np.asarray(labels, dtype=np.int64)
+
+
+class ClimExWaferDataset(Dataset):
+    """Lazy 96x96 preprocessing and WBM-specific ClimEx augmentations."""
+
+    def __init__(
+        self,
+        wafer_maps,
+        labels,
+        indices,
+        mode: str,
+        image_size: int = 96,
+        rotation_degrees: float = 180.0,
+        noise_std: float = 0.1,
+        cutout_scale=(0.08, 0.20),
+    ):
+        self.wafer_maps = wafer_maps
+        self.labels = labels
+        self.indices = np.asarray(indices, dtype=np.int64)
+        self.mode = mode
+        base = [
+            transforms.Resize(
+                (image_size, image_size), interpolation=InterpolationMode.NEAREST
+            ),
+            transforms.ToTensor(),
+        ]
+        self.eval_transform = transforms.Compose(base)
+        self.weak_transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    (image_size, image_size), interpolation=InterpolationMode.NEAREST
+                ),
+                transforms.RandomRotation(
+                    rotation_degrees,
+                    interpolation=InterpolationMode.NEAREST,
+                    fill=0,
+                ),
+                transforms.ToTensor(),
+            ]
+        )
+        self.noise_std = float(noise_std)
+        self.cutout = transforms.RandomErasing(
+            p=1.0, scale=tuple(cutout_scale), ratio=(0.5, 2.0), value=0
+        )
+
+    def __len__(self):
+        return len(self.indices)
+
+    def _image(self, index):
+        array = np.rint(
+            self.wafer_maps[index].astype(np.float32) * 127.5
+        ).astype(np.uint8)
+        return Image.fromarray(array, mode="L")
+
+    def _strong(self, image):
+        tensor = self.weak_transform(image)
+        tensor = self.cutout(tensor)
+        noise = torch.randn_like(tensor) * self.noise_std
+        return (tensor + noise).clamp(0.0, 1.0)
+
+    def __getitem__(self, item):
+        index = int(self.indices[item])
+        image = self._image(index)
+        if self.mode == "unlabeled":
+            return self.weak_transform(image), self._strong(image)
+        tensor = self.weak_transform(image) if self.mode == "train" else self.eval_transform(image)
+        return tensor, int(self.labels[index])
+
+
 class EfficientWaferDataset(Dataset):
     """On-the-fly 3-channel 224x224 preprocessing for lightweight CNNs."""
 
@@ -1171,6 +1253,76 @@ def prepare_datasets_efficient_cnn(data_path: str, seed: int = 42) -> dict:
     }
 
 
+def _limit_stratified_indices(indices, labels, maximum, seed):
+    indices = np.asarray(indices, dtype=np.int64)
+    if maximum is None or len(indices) <= maximum:
+        return indices
+    rng = np.random.RandomState(seed)
+    local = labels[indices]
+    selected = []
+    for cls in np.unique(local):
+        cls_idx = indices[local == cls]
+        quota = max(1, int(round(maximum * len(cls_idx) / len(indices))))
+        selected.extend(rng.choice(cls_idx, min(quota, len(cls_idx)), replace=False))
+    selected = np.asarray(selected, dtype=np.int64)
+    if len(selected) > maximum:
+        selected = rng.choice(selected, maximum, replace=False)
+    return selected
+
+
+def prepare_datasets_climex(
+    data_path: str,
+    labeled_ratio: float = 0.10,
+    seed: int = 42,
+    max_labeled_samples=None,
+    max_unlabeled_samples=None,
+    max_eval_samples=None,
+) -> dict:
+    """Leakage-safe 80/10/10 split and real WM-811K unlabeled pool."""
+    wafer_maps, labels = load_wm811k_raw_all(data_path)
+    labeled_all = np.where(labels >= 0)[0]
+    unlabeled = np.where(labels < 0)[0]
+    train_idx, holdout_idx = train_test_split(
+        labeled_all,
+        test_size=0.20,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels[labeled_all],
+    )
+    val_idx, test_idx = train_test_split(
+        holdout_idx,
+        test_size=0.50,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels[holdout_idx],
+    )
+    labeled_train, _ = train_test_split(
+        train_idx,
+        train_size=labeled_ratio,
+        random_state=seed,
+        shuffle=True,
+        stratify=labels[train_idx],
+    ) if labeled_ratio < 1.0 else (train_idx, np.empty(0, dtype=np.int64))
+    labeled_train = _limit_stratified_indices(
+        labeled_train, labels, max_labeled_samples, seed
+    )
+    val_idx = _limit_stratified_indices(val_idx, labels, max_eval_samples, seed + 1)
+    test_idx = _limit_stratified_indices(test_idx, labels, max_eval_samples, seed + 2)
+    if max_unlabeled_samples is not None and len(unlabeled) > max_unlabeled_samples:
+        rng = np.random.RandomState(seed)
+        unlabeled = rng.choice(
+            unlabeled, int(max_unlabeled_samples), replace=False
+        )
+    return {
+        "wafer_maps": wafer_maps,
+        "all_labels": labels,
+        "labeled_indices": np.asarray(labeled_train),
+        "unlabeled_indices": np.asarray(unlabeled),
+        "val_indices": np.asarray(val_idx),
+        "test_indices": np.asarray(test_idx),
+    }
+
+
 # Диспетчер подготовки данных по имени метода. Большинство методов используют
 # общий grayscale-пайплайн prepare_datasets() (ресайз до 64x64, SMOTE/undersample).
 # CBAM-CNN и HybridCNN-ViT требуют других пайплайнов (нативное разрешение /
@@ -1213,6 +1365,14 @@ _DATASET_PIPELINES = {
         data_path=config["dataset"]["path"],
         seed=seed,
     ),
+    "climex": lambda config, seed: prepare_datasets_climex(
+        data_path=config["dataset"]["path"],
+        labeled_ratio=config["dataset"].get("labeled_ratio", 0.10),
+        seed=seed,
+        max_labeled_samples=config["dataset"].get("max_labeled_samples"),
+        max_unlabeled_samples=config["dataset"].get("max_unlabeled_samples"),
+        max_eval_samples=config["dataset"].get("max_eval_samples"),
+    ),
 }
 
 
@@ -1227,6 +1387,7 @@ def prepare_data_for_method(method_name: str, config: dict, seed: int) -> dict:
         labeled_ratio=config["dataset"]["labeled_ratio"],
         balance_method=config["dataset"]["balance_method"],
         seed=seed,
+        val_ratio=config["dataset"].get("val_ratio", 0.0),
     )
 
 

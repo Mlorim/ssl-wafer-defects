@@ -1,0 +1,695 @@
+Received 30 November 2025, accepted 23 January 2026, date of publication 30 January 2026, date of current version 20 February 2026.
+Digital Object Identifier 10.1109/ACCESS.2026.3659740
+
+
+
+
+Semi-Supervised Learning Under Extreme Class
+Imbalance in Wafer Bin Map Defect Pattern
+Classification
+JINYONG JEONG                  1 , HYUNGU KAHNG                    2 , AND SEOUNG BUM KIM                         1
+1 Department of Industrial and Management Engineering, Korea University, Seongbuk-gu, Seoul 02841, Republic of Korea
+2 Department of Convergence Business, Korea University, Sejong-si 30019, Republic of Korea
+
+Corresponding authors: Hyungu Kahng (hgkahng@korea.ac.kr) and Seoung Bum Kim (sbkim1@korea.ac.kr)
+This work was supported in part by the Brain Korea 21 FOUR, the Ministry of Science and Information and Communication Technology
+(MSIT), South Korea through the Information Technology Research Center (ITRC) Support Program, supervised by the Institute for
+Information Communication Technology Planning and Evaluation under Grant IITP-2020-0-01749; in part by Korea University Grant; and
+in part by the National Research Foundation of Korea Grant funded by Korea Government under Grant RS-2022-00144190.
+
+
+
+
+  ABSTRACT The semiconductor industry faces significant challenges in wafer quality assessment due
+  to the increasing complexity of device fabrication and the rise in inline defects and circuit failures.
+  As manufacturing processes advance, conventional manual analysis of wafer bin maps (WBMs) has
+  become impractical and unreliable, unable to keep pace with the industry’s demands. While convolutional
+  neural networks (CNNs) are widely used in automated systems for classifying WBM defect patterns, their
+  dependence on supervised learning limits their effectiveness, as they cannot utilize the vast amounts of
+  unlabeled WBM data. Additionally, class imbalances in WBM datasets often result in models biased toward
+  majority classes, leading to suboptimal performance. In this study, we produce ClimEx, a semi-supervised
+  learning framework that addresses the extreme class imbalance problem commonly found in WBM datasets
+  through consistency regularization and pseudo-labeling. Our method maintains dynamic per-class thresholds
+  to correct the imbalance in pseudo-labels caused by biased predictions, ensuring balanced representation
+  across classes even under extreme imbalance. On a publicly available benchmark, ClimEx demonstrates
+  improved predictive performance compared to state-of-the-art methods. We also provide a comprehensive
+  analysis of the key components of our method from multiple perspectives.
+
+
+  INDEX TERMS Wafer bin map defect pattern classification, semiconductor manufacturing, semi-supervised
+  learning, class-imbalanced learning, class-imbalanced semi-supervised learning.
+
+
+
+I. INTRODUCTION                                                                                 quality assessment to reduce production costs and sustain
+The semiconductor industry is continuously striving to                                          competitiveness.
+increase its productivity and satisfy the increasing demands                                       The analysis of spatial defect patterns in wafer bin maps
+of the global market. However, the intricate process of semi-                                   (WBMs) is an area of significant interest. WBMs are
+conductor device fabrication, compounded by decreasing                                          graphical representations of the test results for individual
+node sizes and the integration of more chips on a single                                        chips on a semiconductor wafer, indicating whether each chip
+wafer, has led to a rise in inline defects and circuit failures.                                passed or failed specific quality tests. The spatial pattern of
+Such issues adversely affect the overall yield, prompt-                                         defects provides crucial insights into process failures and
+ing manufacturers to seek advanced techniques for wafer                                         their underlying causes and has traditionally been analyzed
+                                                                                                manually by experienced engineers. However, with modern
+                                                                                                fabs producing thousands of wafers per week, this manual
+   The associate editor coordinating the review of this manuscript and                          approach is becoming untenable and unreliable. Furthermore,
+approving it for publication was Massimo Cafaro              .                                  the vast amounts of unexamined WBM data represent a
+                                                  2026 The Authors. This work is licensed under a Creative Commons Attribution 4.0 License.
+26672                                                    For more information, see https://creativecommons.org/licenses/by/4.0/                   VOLUME 14, 2026
+J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+missed opportunity to identify root causes and improve                    II. RELATED WORK
+yield.                                                                    A. WAFER BIN MAP PATTERN CLASSIFICATION
+   To address these challenges, automated systems capable                 WBM defect pattern classification is a crucial task in the
+of effectively analyzing WBM defect patterns are essen-                   semiconductor industry, playing a vital role in quality control
+tial. Recently, convolutional neural networks (CNNs) have                 and yield improvement. However, this task faces significant
+emerged as a popular and standard choice for classifying                  challenges, including the need for large amounts of labeled
+WBM defect patterns [1], [2]. However, these methods are                  data and the inherent class imbalance in defect patterns. These
+highly dependent on supervised learning with labeled data,                challenges have led to extensive studies exploring various
+which are often limited in quantity and potentially biased due            approaches to improve classification accuracy and efficiency.
+to the subjective nature of expert domain involvement in the                 CNNs have gained considerable attention for WBM defect
+labeling process [3].                                                     pattern classification due to their remarkable performance
+   Meanwhile, in the field of computer vision, the use of                 in image classification by preserving spatial information.
+unlabeled data through semi-supervised learning (SSL) has                 One study focused on the classification of mixed-type defect
+recently gained momentum, particularly in situations where                patterns using CNNs, proposing an architecture designed to
+labeled data are scarce [4], [5], [6], [7], [8], [9], [10]. Several       capture both local and global features of WBMs [1]. Another
+recent studies have also explored the use of unlabeled data               investigation explored CNN-based classification of defect
+to train models to classify WBM defect patterns [11], [12],               patterns using a synthetic WBM dataset and demonstrated
+[13], [14]. However, these studies often overlook the issue of            their applicability to wafer map image retrieval [22]. Further
+class imbalance in WBMs, where the distribution of samples                work addressed class imbalance in WBM datasets through
+between different classes is uneven [3]. Unlike relatively                a data augmentation-based oversampling strategy combined
+balanced scenarios commonly seen in computer vision                       with CNNs, highlighting the challenge posed by imbalanced
+benchmarks [15], [16], [17], imbalanced distributions of                  data [23]. In addition, a supervised contrastive learning
+defect patterns are a prevalent challenge that has not yet been           technique was used to enhance feature representations within
+adequately addressed. This imbalance can significantly skew               a CNN training framework, resulting in improved WBM
+the model predictions, affecting the overall classification               pattern classification accuracy [2].
+performance and especially disadvantaging underrepresented                   Although these CNN-based methods have shown promis-
+classes [18].                                                             ing results, they largely rely on supervised learning, which
+   Building on recent advances in class-imbalanced semi-                  demands a substantial amount of labeled data. In an effort
+supervised learning (CISSL) [19], [20], [21], we propose                  to alleviate this requirement, recent research has leveraged
+ClimEx, a novel framework specifically designed for WBM                   unlabeled data, which are abundantly available even in cases
+defect pattern classification under extreme class imbalance.              where labeled data are scarce. One approach introduced
+While existing methods like Adsh [21] employ dynamic                      a semi-supervised and incremental modeling framework
+thresholding to mitigate bias, they often suffer from severe              for WBM classification that incorporates both labeled and
+threshold fluctuations in extremely imbalanced scenarios,                 unlabeled data, effectively improving classification accuracy
+leading to training instability. ClimEx addresses this lim-               under limited labeled data conditions [11]. Another model
+itation by integrating consistency regularization, pseudo-                used pretext-invariant representation learning (PIRL) and
+labeling, and a momentum-based dynamic thresholding                       data augmentation techniques tailored to WBMs [12],
+mechanism. Specifically, the momentum update stabilizes                   while a different study developed a semi-supervised WBM
+the volatile dynamic thresholds required for handling the                 pattern recognition method integrating domain-specific data
+extreme imbalance (approx. 85% majority) characteristic of                augmentation and contrastive learning [13].
+WBM data. By ensuring a balanced representation across                       These approaches demonstrated effective use of unlabeled
+classes without collapsing into trivial solutions, our method             data for enhanced classification performance but did not
+demonstrates superior stability and predictive performance                explicitly address class imbalance within their learning
+compared to state-of-the-art algorithms on a publicly avail-              frameworks. To resolve this issue, some recent efforts have
+able benchmark.                                                           proposed more sophisticated methods. One such method
+   The remaining sections of this paper are organized as                  applied an ensemble-based SSL approach that combines
+follows: Section II provides a brief review of related work               outputs from multiple CNN models, mitigating the impact
+on WBM defect pattern classification and recent advances                  of class imbalance by leveraging the diversity of the ensem-
+in class-imbalanced semi-supervised learning. The details of              ble [24]. Another study introduced a dual-head CNN with two
+the proposed methodology is illustrated in Section III. The               classification heads—one focusing on overall accuracy and
+experimental results are reported in Section IV. Section V                the other on class-wise accuracy—thus handling imbalance
+provides a discussion on threshold fluctuation and its                    by encouraging attention to minority classes [14].
+stabilization, highlighting the significance of these aspects in             However, these methods do not explicitly address
+our research. Finally, Section VI presents concluding remarks             class imbalance within both consistency regularization
+and outlines for future research.                                         and pseudo-labeling frameworks, often relying on the
+
+
+VOLUME 14, 2026                                                                                                                    26673
+                                                                      J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+architecture’s inherent ability to balance class-specific and     strict assumptions, such as the need for prior knowledge of
+overall performance. In contrast, our method focuses on           the class distribution of unlabeled data or the assumption
+improving the quality of pseudo-labels through an adap-           that the class distribution should be identical between labeled
+tive thresholding mechanism, which dynamically updates            and unlabeled data. In the case of WM-811K, the class
+thresholds to reduce the likelihood of incorrect pseudo-          distribution of the unlabeled data remains unknown.
+labeling. This approach inherently aligns with consistency           A more recent work proposed an adaptive thresholding
+regularization and ensures better representation of both          method for CISSL [21]. Their approach dynamically adjusted
+majority and minority classes throughout the learning             the decision threshold based on logits or probabilities of
+process.                                                          predicted classes, effectively using labeled and unlabeled
+                                                                  data in imbalanced scenarios. This method improved the
+B. CLASS-IMBALANCED SEMI-SUPERVISED LEARNING                      performance of SSL algorithms without requiring class
+We aim to address the challenge of WBM defect pattern             distribution constraints.
+classification by using unlabeled WBM data for effective             Our method takes advantage of the adaptive threshold-
+representation learning, while considering the extreme class      ing approach to address the extreme class imbalance in
+imbalance present in WBM datasets. SSL aims to enhance            WBM defect pattern classification. We further improve the
+the model’s performance using unlabeled data, thereby             adaptive thresholding mechanism of [21] by incorporat-
+reducing reliance on the quantity of labeled data. Prominent      ing a momentum-based update strategy. This modification
+approaches include the concepts of pseudo-labeling and            allows for more stable and effective threshold adjustments,
+consistency regularization [4], [5], [6], [7], [8], [9], [10].    particularly in scenarios with severe class imbalance such
+   Pseudo-labeling involves the use of the predictions of a       as those encountered in WBM datasets. By combining the
+trained model to generate pseudo-labels for unlabeled data,       flexibility of adaptive thresholding with the stability of
+which are subsequently used for further model training in         momentum updates, we achieve improved performance in
+an iterative manner [4]. Consistency regularization aims to       handling the unique challenges posed by WBM classification
+enhance the robustness and generalization of a model by           tasks. Our work not only addresses the limitations of
+leveraging unlabeled data to penalize the prediction variations   previous CISSL methods, but also pushes the boundaries
+caused by input perturbations [6]. It can employ either           of classification accuracy in extremely imbalanced, semi-
+soft [5], [7], [8], [9] or hard [10] pseudo labels in the         supervised scenarios typical in semiconductor manufacturing
+regularization process.                                           processes.
+   These studies demonstrated state-of-the-art performance
+on classic image benchmarks and have approached the               III. METHODOLOGY
+performance of supervised learning when all data were             In this section, we introduce our CISSL framework for WBM
+labeled. However, in more realistic scenarios, such as the        defect pattern classification. We begin with the problem
+WM-811K dataset with class imbalance, SSL algorithms              setting in Section III-A, followed by relevant background
+exhibit poor performance because they are biased toward           in Section III-B, and then detail the proposed method in
+the majority class [19], [20], [21]. In particular, in SSL        Section III-C. An overview of our method is shown in
+algorithms that employ pseudo-labeling and consistency            Figure 1.
+training, an imbalanced class distribution results in biased
+model predictions in favor of the majority class, resulting       A. PROBLEM SETTING
+in pseudo labels that are also biased toward the majority         We consider the standard SSL settingwhere we are presented
+class. Additionally, the computation of the consistency loss      with a labeled WBM dataset Dl = (xl1 , yl1 ), . . . , (xlN , ylN )
+is dominated by the losses associated with the majority class.    and an unlabeled WBM dataset Du = {xu1 , . . . , xuM }, where
+   Recently, CISSL algorithms have been proposed to               x ∈ X represents the input WBM and y ∈ Y = {1, 2, · · · , K }
+enhance the robustness and generalization of SSL algorithms       represents the labels for a K -way defect pattern classification
+in real-world scenarios characterized by class imbalance.         task. The goal is to learn a probabilistic deep neural network
+[19] proposed a method to refine raw biased pseudo                classifier f : X → 1K −1 on the basis of Dl and Du . Given
+labels via convex optimization, addressing the challenges          lbatch-wise
+                                                                  the               nature of neural network training, let B l =
+                                                                     xi , yi : i = 1, . . . , B be a batch of B labeled examples
+                                                                           l
+                                                                             
+posed by class imbalance in SSL. This approach used
+pseudo-labeling and introduced a novel refinement process         sampled from Dl , and B u = {xui : i = 1, . . . , µB} be a batch
+to align the distribution of labeled and unlabeled data,          of µB unlabeled examples sampled from Du . Note that µ ∈ N
+resulting in improved performance in class-imbalanced             is merely a hyperparameter that determines the relative batch
+scenarios. Another study introduced class rebalancing self-       size of B u with respect to B l . For the purpose of illustration,
+training, a self-training framework for CISSL that addressed      we assume that the K classes are sorted in descending order
+class imbalance by iteratively reweighting and relabeling         according to the sample sizes, starting with the majority
+samples [20]. Their approach achieved better performance by       class with the largest sample size being class 1, and ending
+effectively leveraging unlabeled data and rebalancing class       with the minority class with the smallest sample size being
+distributions during training. However, these studies have        class K .
+
+26674                                                                                                                        VOLUME 14, 2026
+J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+                  FIGURE 1. A schematic overview of our method, ClimEx, highlighting the process of per-class threshold updates. For
+                  simplicity, the supervised learning component is omitted. Each unlabeled example is processed through weak and
+                  strong augmentation pipelines: the weakly augmented version generates pseudo-labels, while the strongly augmented
+                  version serves as the target for consistency regularization. Per-class thresholds are dynamically updated to ensure
+                  balanced pseudo-label generation.
+
+
+
+
+TABLE 1. Comparison of ClimEx with existing semi-supervised learning           where d : Y × Y → R+ is a functional measure
+frameworks. ClimEx is explicitly designed to handle extreme class
+imbalance in WBM datasets by stabilizing dynamic thresholds.                   of discrepancy between two probability distributions (e.g.,
+                                                                               cross entropy). It is to note that the choice of weak and
+                                                                               strong augmentations is a critical factor in maximizing the
+                                                                               effectiveness of these simple yet powerful techniques. For
+                                                                               our WBM defect pattern classification task, we tailored the
+                                                                               augmentations by exploring the five WBM augmentations
+                                                                               introduced by [12].
+                                                                                  Specifically, the rotation strategy, where WBMs are
+B. BACKGROUND                                                                  geometrically rotated to some random degree, may serve as a
+To fully utilize the information in the unlabeled WBM data,                    form of weak augmentation, aiming to minimally alter input
+our proposed method is based on two key principles of deep                     data while preserving essential WBM attributes. Meanwhile,
+SSL: consistency regularization and pseudo-labeling [10].                      a combination of cropping, cutout, noise addition, and
+Consistency regularization promotes semantic stability in a                    shifting can serve as strong augmentations, introducing
+probabilistic deep neural network classifier f by encouraging                  more pronounced variations that challenge the model to
+it to produce consistent predictions across diversely perturbed                maintain consistent predictions against, thereby promoting
+(or augmented) versions of the same input. This technique                      robustness and enhancing its ability to generalize from
+enhances the model’s ability to capture invariant patterns,                    complex data patterns. We empirically justify the choice of
+thereby improving generalization, particularly in scenarios                    our augmentations in Section IV-C.
+with limited labeled data.
+                                                                               C. PROPOSED METHOD
+    Technically, this approach minimizes the discrepancy
+between the pseudo-labels generated by hard-assigning the                      The semi-supervised training loss of our proposed method is
+probabilistic prediction on one perturbed version of the input,                composed of a supervised loss Ls based on labeled examples
+obtained through a weak stochastic augmentation operator α :                   B l and an unsupervised loss Lu based on unlabeled examples
+X → X , and the raw predicted probability distribution from                    B u . Similar to [10], we formulate the supervised loss Ls
+another perturbed version, created via a strong stochastic                     using the standard categorical cross-entropy loss with weakly
+augmentation operator A : X → X :                                              augmented labeled examples as follows:
+                                                                                                     B K
+                                                                                                   1 XX                     h         i
+                        h                    i                                  Ls (B l ; f ) ≜ −          1(yli = k) · log f α(xli )     (1)
+                   min E d f (α(x)), f (A(x))                                                      B                                     k
+                     f                                                                                 i=1 k=1
+
+VOLUME 14, 2026                                                                                                                         26675
+                                                                      J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+where 1(·) ∈ {0, 1} is the indicator function, and f (x)          to generalize effectively on the minority classes, resulting in
+represents the predicted class probability vector given input     poor predictive performance.
+x. [f (x)]k denotes the predicted probability associated with        Class imbalance poses a significant challenge for semi-
+the k-th class.                                                   supervised learning, particularly in the early stages of
+   To construct the unsupervised loss Lu , hard pseudo-           training where the model is prone to generate overly
+labeling is performed by assigning a deterministic label          confident predictions for the majority classes [20], [25].
+corresponding to the class with the highest predicted prob-       These confident predictions rapidly drive down the training
+ability produced by the model f given a weakly augmented          loss, erroneously reinforcing the model’s bias towards the
+unlabeled example α(xui ). In other words, if the model assigns   majority classes. Consequently, the model struggles not only
+highest probability to class
+                          k, the pseudo-label is equal to        to classify minority classes correctly, but also to produce
+k. Let qui = f α(xui ) denote the predicted probability           sufficiently confident predictions exceeding the threshold τ
+vector given the i-th weakly augmented unlabeled example.         for these classes. This results in skewed pseudo-labeling,
+Mathematically, hard pseudo-labeling can be expressed as          where most of the pseudo-labels are assigned to the majority
+follows:                                                          classes, further exacerbating class imbalance.
+                                                                     To mitigate this problem, we propose to employ a
+                        ŷui = arg max [qui ]k .           (2)    class-dependent threshold instead of a fixed global thresh-
+                                   k
+                                                                  old [21]. Concretely, our proposed method uses class-wise
+                                                                                 (t)
+Once the pseudo-label is obtained using Eq. (2), consistency      thresholds τk for k ∈ {1, . . . , K } which are dynamically
+regularization is introduced to minimize the discrepancy          updated at any training iteration t ∈ {1, . . . , T }. To simplify
+against the probabilistic predictions made on top of the          the notation, let pui = (pui1 , pui2 , . . . , puiK ) = f (α(xui )) be the
+strongly augmented version A(xui ). This enables the model        predicted probability vector for the i-th weakly augmented
+to capture better generalizable representations of WBMs.          unlabeled example. For any class k at iteration t, we first
+                                                                                     (t)
+The consistency regularization term for the i-th unlabeled        define a set Ck whose elements are the probabilities puik
+example is formulated using the categorical cross entropy         for which k is the class index that achieves the maximum
+function:                                                         probability in the vector pui , for i ∈ {1, . . . , µB}. In other
+                                                                             (t)
+                  K                                               words, Ck is the collection of probabilities where class k
+                        1(ŷui = k) · log f A(xui ) k
+                  X                               
+             −                                             (3)    is the most likely class according to the model’s predictions
+                  k=1                                             for each unlabeled example. This can be mathematically
+                                                                  expressed as:
+   It is worth noting that in a class-balanced scenario where                    n                                                  o
+classes are uniformly distributed, we need not consider                   (t)
+                                                                         Ck ≜ puik arg max puij = k, i ∈ {1, . . . , M } . (5)
+the per-class quantity of pseudo-labels in a training batch,                              j∈{1,...,K }
+but only the quality of the pseudo-labels [10]. Thus, it is
+                                                                  Specifically, for each unlabeled example in Du , the model
+reasonable to allow unlabeled examples with high maximal
+                                                                  predicts a probability distribution over all possible classes
+predictive confidence to participate in training, given that it
+                                                                  (e.g., via a softmax). We then look at which class is assigned
+exceeds a fixed high threshold τ equally applied to all classes
+                                                                  the highest probability. If class k is associated with the highest
+(e.g., τ = 0.95). We may formulate an unsupervised loss                                                            (t)
+                                                                  probability, that probability is included in Ck . In other words,
+function given an unlabeled batch B u with a fixed threshold        (t)
+τ as follows:                                                     Ck gathers all probabilities where class k was the top choice
+                                                                  according to the model.
+      K µB                                                                      (t)
+   1 XX                                                               Given Ck , the next step is to determine a per-class
+        1(max(qui ) ≥ τ ) · 1(ŷui = k) · log f A(xui ) k
+                                                      
+−                                                                                                               (t)
+  µB                                                              probability to use as a threshold τk that allows an
+        i=1 k=1
+                                                                  approximately equal proportion of unlabeled examples per
+                                                           (4)    class to be pseudo-labeled and participate in model training.
+   However, in a class-imbalanced scenario which is com-          To achieve this, we first calculate the proportion ρ (t) ∈
+monly observed in WBM data [3], using a fixed threshold           [0, 1] of pseudo-labeled examples which are to belong to the
+                                                                                                                            (t)
+as for Eq. (4) can result in low recall rates for minority        majority class (k = 1) using an arbitrary threshold τ1 (e.g.,
+                                                                    (1)     (2)           (T )
+classes [20], [21]. The underlying reason for this bias           τ1 = τ1 = . . . = τ1 = 0.95):
+towards the majority class(es) lies in the skewed class
+                                                                                                   (t) 1(p ≥ τ1 )
+                                                                                             P                 (t)
+distribution of the labeled training data. With an imbalanced                                  p∈C1
+                                                                                    ρ =
+                                                                                      (t)
+                                                                                                                    ,            (6)
+class distribution, the model encounters a higher frequency                                             (t)
+                                                                                                       C1
+of examples from the majority classes, resulting in an
+overemphasis on accurately predicting them. In other words,       which is essentially the proportion of unlabeled examples
+the model’s responsiveness to minority classes diminishes,        who are to participate in training with a pseudo-label of y = 1.
+                                                                                                                             (t)
+reducing both recall and accuracy in identifying under-           Based on ρ (t) , we determine the dynamic thresholds τk for
+                                                                                                             (t)
+represented classes. This bias impedes the ability of the model   k ∈ {2, . . . , K }. Let N (p) = {q ∈ Ck : q ≥ p} be the
+
+26676                                                                                                                        VOLUME 14, 2026
+J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+number of candidates with probability at least p. We set:                       TABLE 2. Basic statistics of the WM-811K benchmark.
+                     (                          )
+           (t)              (t) N (p)
+          τk = min p ∈ Ck          (t)
+                                        ≥ρ  (t)
+                                                  .       (7)
+                                 Ck
+Herein, we seek the smallest probability p such that the
+                               (t)
+proportion of elements in Ck whose values are greater
+than or equal to p is at least ρ (t) . This approach ensures
+that pseudo-labels are selected with thresholds reflecting
+equivalent levels of prediction confidence across all classes,
+thereby balancing class representation in the pseudo-labeling
+process.
+   Using class-specific thresholds dynamically updated over
+time, the unsupervised loss Lu is reformulated as follows:
+                                                                                are associated with human-annotated labels, each represent-
+                                 µB    K
+                            1 XX                                                ing one of nine defect patterns (K = 9). The remaining
+        Lu (B u ; f ) = −              1 max(qui ) > τŷ(t)u ·
+                                                            
+                           µB                            i
+                                                                                638,507 form a significantly large unlabeled set. The class
+                               i=1 k=1                                          distribution is highly imbalanced, with the dominant class
+                     1(ŷi = k) log f A(xi ) k .
+                         u               u
+                                           
+                                                                          (8)   accounting for approximately 85% of the entire population.
+                                                                                Detailed sample counts and proportions are presented in
+   Ultimately, our proposed loss function is defined as the
+                                                                                Table 2.
+sum of the supervised loss from Eq. (1) and the unsupervised
+                                                                                   Each WBM represents the binary test results of a
+loss from Eq. (8):
+                                                                                semiconductor wafer, whose values indicate the presence
+              L(B l , B u ; f ) = Ls (B l ; f ) + Lu (B u ; f )           (9)   or absence of defects. Normal dies have a value of one,
+                                                                                while defective dies have a value of two. Locations outside
+   In early-stage evaluations where models were trained                         the specified circular WBM region are assigned values of
+based on the thresholds obtained via Eq. (7), we observed                       zero. Because the spatial dimension varies across WBMs,
+unexpected fluctuations in the thresholds over time, which                      we resized them to a 96 × 96 image based on nearest neighbor
+likely contributed to suboptimal classification performance.                    interpolation following [12].
+We attribute this challenge primarily to the extreme class
+imbalance present in WBM defect patterns. As shown in                           B. TRAINING CONFIGURATIONS
+Table 2, the majority class, ‘None’, comprises 85.24% of                        The labeled dataset was divided into three subsets: 80% for
+the labels, overwhelmingly dominating the other classes.                        training, 10% for validation, and 10% for testing. Following
+We empirically support this conjecture in Section V.                            the standard evaluation protocol used in several SSL studies,
+   To address this issue, we propose a momentum-based                           [10], [26], [27], [28], we evaluated model performance in
+update for the per-class thresholds as a simple yet effec-                      scenarios with limited labeled data. Specifically, a random
+tive solution to prevent fluctuations and stabilizing model                     portion of the labeled data, along with the entire unlabeled
+training:                                                                       dataset, is used for training. We considered various sce-
+                     (t)
+                   τk ← (1 − λ)τk + λτk
+                                        (t)       (t−1)
+                                                          .           (10)      narios, ranging from 1% (1,383 instances) of the labeled
+                                                                                training data to 100% (138,360 instances), allowing us to
+In Eq. (10), λ ∈ [0, 1] is the momentum coefficient that                        assess the model’s performance across different labeled data
+controls the influence of the previous threshold value on                       sizes.
+the current update. A higher λ assigns greater weight to                           We used ResNet-18 [29] as the CNN backbone for feature
+the thresholds from the previous iteration. As updates are                      extraction, with a linear classifier stacked on top, consisting
+iteratively applied, the influence of past values accumulates                   of a fully connected layer followed by a softmax activation
+exponentially, moderated by λ, thereby shaping the current                      function to convert the output logits into valid probabilities.
+threshold. In preliminary experiments, we conducted a grid                      To mitigate potential overfitting, dropout with a probability
+search with λ values in [0.1, 0.2, 0.5, 0.8, 0.9] and found that                of 0.5 was applied before the linear classifier [30]. Models
+λ = 0.8 provided the best performance in practice.                              were trained for 51,200 iterations with a batch size of 256 for
+                                                                                both labeled and unlabeled data (i.e., µ = 1). Pseudo-labeling
+                                                                                             (t) (t)          (t)
+IV. EXPERIMENTS                                                                 thresholds τ2 , τ3 , . . . , τ9 were dynamically updated every
+                                                                                                                           (t)
+A. DATASET                                                                      512 training iterations, while keeping τ1 = 0.95 constant.
+We evaluated the performance of our method on the publicly                      We used the Adam optimizer with a base learning rate of
+available benchmark for WBM defect pattern classification,                      0.001 and default hyperparameters (β1 = 0.9, β2 = 0.999)
+WM-811K [3], which consists of 811,457 WBMs acquired                            [31]. The base learning rate was selected through a grid search
+from a real-world fabrication process. Only 172,950 WBMs                        over the values {0.01, 0.005, 0.001, 0.0005, 0.00001}.
+
+VOLUME 14, 2026                                                                                                                          26677
+                                                                      J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+   For model selection, we measured model performance             (e.g., 1%), the standard errors remain low, suggesting that the
+on the held-out validation set every 512 iterations using         momentum mechanism effectively stabilizes training without
+the macro F1 score, a widely used metric for classification       requiring extensive hyperparameter search. The results show
+tasks with class imbalance. This metric is computed by            that λ = 0.8 achieves the highest performance. Therefore,
+first calculating the F1 score for each class and then taking     unless otherwise stated, we default to λ = 0.8 in all
+their macro-average, ensuring equal contribution from each        experiments.
+class to the overall score, regardless of class prevalence. The      We conducted an additional experiment to identify the opti-
+F1 score for class k is the harmonic mean of precision and        mal combinations for weak and strong augmentations, α(·)
+recall for that class, defined as follows:                        and A(·), that yield the highest classification performance.
+                         Precision(k) × Recall(k)                 To isolate the impact of different augmentations, we used Fix-
+          F1 (k) = 2 ×                            ,               Match as a testbed due to its use of a unified fixed threshold
+                         Precision(k) + Recall(k)
+                                                                  for pseudo-labeling across classes—a feature typical of SSL
+                               TP(k)
+where Precision(k) = TP(k)+FP(k)         and Recall(k) =          algorithms designed for balanced class settings. In contrast,
+   TP(k)                                                          Adsh and our method use dynamic per-class thresholds,
+TP(k)+FN (k) . Here, TP(k), FP(k),   and  FN (k) denote the
+counts of true positive, false positive, and false negative       which we believed could complicate the proper evaluation of
+predictions for class k. The macro F1 score is then derived       the augmentation effects. As shown in Table 5, rotation and
+by macro-averaging the F1 (k) scores across all classes:          flip were selected as weak augmentations to support reliable
+                                                                  pseudo-labeling by maintaining the semantics of the WBM
+                                   K
+                               1 X                                input (e.g., defect orientation invariance). The candidates for
+                 macro F1 =        F1 (k).
+                               K                                  strong augmentation were random select, cutout + noise,
+                                  k=1
+                                                                  and cutout + crop. These strong augmentations were chosen
+This metric provides a comprehensive assessment of the            to simulate real-world process imperfections and force the
+model’s performance across classes of varying sizes, balanc-      model to learn robust global features rather than overfitting to
+ing precision and recall in the context of class imbalance.       local artifacts. The random select option randomly chooses
+In each trial, we selected the model with the highest             two augmentations from cropping, cutout, noise addition,
+validation macro F1 score as the best model, and evaluated        and shifting [12]. Based on their consistent and stable
+its generalization performance on the test set using the macro    performance across experiments, rotation and cutout +
+F1 score.                                                         noise were identified as the most effective weak and strong
+                                                                  augmentations, respectively. In all experiments, these were
+C. COMPARISON WITH SSL APPROACHES                                 used for FixMatch, Adsh, and our proposed method.
+First, we demonstrated the effectiveness of our framework
+by comparing its performance against two popular SSL
+methods in computer vision, FixMatch [10] and Adsh [21],          E. COMPARISON WITH A SELF-SUPERVISED
+as well as two recent SSL methods specifically developed          CONTRASTIVE LEARNING APPROACH
+for WBM defect pattern classification, SSL-Ensemble [24]          Comparing SSL and self-supervised contrastive learning
+and SSL-Dual-Head [14]. Table 3 presents the classification       (SSCL) is crucial because both aim to leverage unlabeled data
+performance in terms of the macro F1 score, averaged              to overcome the limitations of scarce labeled data, though
+over ten trials with different random seeds. Each column          they do so through different training frameworks [28], [32],
+corresponds to a different proportion of labeled training data,   [33], [34]. SSL seeks to enhance classification performance
+and each row to a different training method. Overall, our         by simultaneously using labeled and unlabeled data in a
+method consistently outperformed all other methods across         single-stage learning process. In contrast, SSCL focuses on
+all proportions of labeled data. Notably, in the 1% and 5%        learning generalizable representations from unlabeled data
+labeled data scenarios—both realistic from a labeling cost        during a pre-training phase, which then improves downstream
+perspective and indicative of model performance in data-          classification tasks during fine-tuning. This comparison
+scarce environments—our method surpassed the second-best          allows for evaluating the effectiveness of each approach
+method by 2.0% and 1.7%, respectively.                            across varying levels of labeled data availability.
+                                                                     We selected WaPIRL [12], a state-of-the-art self-
+D. CHOICE OF HYPERPARAMETERS                                      supervised contrastive learning method for WBM defect
+In Table 4, we evaluate the sensitivity of our method to          pattern classification, as our direct competitor. The training
+the momentum coefficient λ, which controls the stability          configurations differed slightly from those described in
+of threshold updates. We report the Macro F1 score across         Section IV-B. To ensure a fair comparison, experiments
+different choices of λ ∈ {0.1, 0.2, 0.5, 0.8, 0.9}. The results   were conducted using a VGG16 backbone [35] instead of
+indicate that ClimEx is highly robust to variations in this       ResNet-18. Our model was trained for 102,400 iterations
+hyperparameter. As shown in the table, the performance            with a batch size of 256 to ensure convergence. We used
+differences across the tested values are minimal, particularly    the stochastic gradient descent (SGD) optimizer with a
+in the range of [0.5, 0.9]. Even with limited labeled data        momentum factor of 0.9, a base learning rate of 0.001, and
+
+26678                                                                                                                        VOLUME 14, 2026
+J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+TABLE 3. Comparison of classification performance using the macro F1 score (CNN backbone: ResNet-18). For each labeled data proportion, the best
+macro F1 score across methods is boldfaced (columnwise). The mean and standard errors (in parentheses) are calculated across ten random trials.
+
+
+
+
+TABLE 4. Evaluation of ClimEx with different momentum coefficients λ. We reported the mean and standard errors across ten independent runs.
+
+
+
+
+TABLE 5. Experimental results to determine the baseline combinations of weak and strong augmentations using macro F1 score. We reported the mean
+and standard errors calculated across ten independent runs.
+
+
+
+
+a weight decay factor of 0.00001. The learning rate was                     supervised fine-tuning—our method unifies these stages into
+adjusted using a half cosine schedule [36]. A grid search                   a single phase. This integration allows for consideration
+over the values {0.01, 0.005, 0.001, 0.0005, 0.00001} was                   of class distribution during model training, significantly
+conducted to determine the optimal learning rate and weight                 enhancing our model’s ability to effectively address class
+decay. Model selection was based on the macro F1 score,                     imbalance.
+measured on the validation set every 512 iterations. The
+test macro F1 scores, summarized in Table 6, show that our                   V. DISCUSSION
+method is on par with WaPIRL across all proportions of                      As previously noted, the momentum-based update mech-
+labeled data. Notably, unlike SSCL approaches that require                  anism in Eq. (10) is crucial for avoiding undesirable
+two distinct phases—unsupervised pre-training followed by                   fluctuations in per-class thresholds under an extreme class
+
+VOLUME 14, 2026                                                                                                                               26679
+                                                                                 J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+TABLE 6. Comparison with a self-supervised learning approach using macro F1 scores. The best macro F1 score across methods and labeled data
+proportions is boldfaced for each column. We reported the mean and standard errors across ten independent runs.
+
+
+
+
+                                                                             performance at different stages of training. We believe
+                                                                             it is advantageous for the thresholds to decrease almost
+                                                                             monotonically as training progresses, which is the case when
+                                                                             the momentum-based update mechanism is applied (blue).
+                                                                             This is a valid statement, as in the early stages of training,
+                                                                             when the model is likely underfitting, higher thresholds
+                                                                             should allow only examples with highly confident predictions
+                                                                             to be pseudo-labeled. On the other hand, pseudo-labels with
+                                                                             lower confidence should be introduced only after the model
+                                                                             has established clearer decision boundaries.
+                                                                                To further investigate the question of when the thresholds
+                                                                             fluctuate, we conducted an additional simulation under a
+                                                                             less extreme class imbalance setup, similar to the setting
+                                                                             discussed in Adsh [21]. First, we randomly divided the
+FIGURE 2. Per-class thresholds plotted as a function of iterations, with     original labeled data into a 30% labeled and a 70% unlabeled
+(blue) and without (gray) the momentum-based update mechanism. Both
+models were trained with 1% labeled data.                                    dataset, completely discarding the original unlabeled set.
+                                                                             This approach allowed us to maintain full control over the
+                                                                             imbalance ratio, given the labels for every data instance.
+                                                                             Next, we simulated an imbalance ratio of 100 in which
+                                                                             the sample size of the majority class, ‘None’, is reduced
+                                                                             to 100 times the size of the minority class, ‘Near-Full’.
+                                                                             As shown in Figure 3, the thresholds are relatively stabilized
+                                                                             without the momentum-based update mechanism, in turn
+                                                                             supporting our statement that the fluctuations were primarily
+                                                                             driven by the extreme level of class imbalance. This suggests
+                                                                             that the momentum-based update mechanism is an essential
+                                                                             component of the proposed method for handling extreme
+                                                                             class imbalance.
+
+                                                                             VI. CONCLUSION
+                                                                             In this study, we addressed the significant challenges of small
+                                                                             labeled datasets and imbalanced class distributions in WBM
+FIGURE 3. Per-class thresholds (without momentum) plotted as a
+function of iterations, under an simulated scenario with a class imbalance
+                                                                             defect pattern classification. We introduced ClimEx, a novel
+ratio of 100 between the majority class ‘none’, and the minority class       semi-supervised learning framework based on consistency
+‘near-full’.                                                                 regularization and pseudo-labeling, which effectively mit-
+                                                                             igates the impact of class imbalance through dynamically
+                                                                             updated, class-specific thresholds for pseudo-labeling. Using
+imbalance setting, as observed in the WM-811K bench-                         a publicly available dataset from a real-world fabrication
+mark. Preliminary experiments indicated that without this                    process, we demonstrated the effectiveness of our method
+mechanism, model training becomes unstable and prone                         from multiple perspectives, showing its potential to enhance
+to suboptimal solutions. We trained two models, with and                     WBM defect pattern classification in real-world, class-
+without momentum, to explore how the thresholds change                       imbalanced environments.
+over time. In Figure 2, we plotted the threshold values as                      For the semiconductor industry, the proposed method
+a function of iterations, for all classes except the majority                offers a promising, automated, and reliable solution for wafer
+class, ‘None’. Without momentum-based updates (gray),                        quality assessment. By leveraging both labeled and unlabeled
+the thresholds fluctuate substantially, which is undesirable                 data and effectively managing inherent class imbalance, our
+because it can lead to erroneous pseudo-labels hampering                     approach can assist manufacturers in identifying process
+
+26680                                                                                                                                   VOLUME 14, 2026
+J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+failures and their root causes, leading to improved yields and                        [9] W.-N. Hsu, ‘‘Unsupervised data augmentation for consistency training,’’
+reduced production costs. ClimEx opens up new possibilities                               in Proc. Adv. Neural Inf. Process. Syst., 2024, pp. 6256–6268.
+                                                                                     [10] K. Sohn, D. Berthelot, N. Carlini, Z. Zhang, H. Zhang, C. A. Raffel,
+for more accurate and dependable WBM defect pattern                                       E. D. Cubuk, A. Kurakin, and C.-L. Li, ‘‘FixMatch: Simplifying semi-
+classification in semiconductor manufacturing.                                            supervised learning with consistency and confidence,’’ in Proc. Adv.
+   Although ClimEx has shown promising results in over-                                   Neural Inf. Process. Syst., 2020, pp. 596–608.
+                                                                                     [11] Y. Kong and D. Ni, ‘‘A semi-supervised and incremental modeling
+coming key obstacles in WBM defect pattern classification,                                framework for wafer map classification,’’ IEEE Trans. Semicond. Manuf.,
+there are opportunities for further research to enhance                                   vol. 33, no. 1, pp. 62–71, Feb. 2020.
+this approach. Future work could focus on systematically                             [12] H. Kahng and S. B. Kim, ‘‘Self-supervised representation learning for
+selecting the most effective augmentation strategies for                                  wafer bin map defect pattern classification,’’ IEEE Trans. Semicond.
+                                                                                          Manuf., vol. 34, no. 1, pp. 74–86, Feb. 2021.
+consistency regularization. Exploring a broader range of data                        [13] H. Hu, C. He, and P. Li, ‘‘Semi-supervised wafer map pattern recognition
+augmentation techniques and employing automated methods,                                  using domain-specific data augmentation and contrastive learning,’’ in
+such as Bayesian optimization or reinforcement learning-                                  Proc. IEEE Int. Test Conf. (ITC), Oct. 2021, pp. 113–122.
+                                                                                     [14] S. Manivannan, ‘‘Semi-supervised imbalanced classification of
+based strategies, could efficiently optimize the augmentation                             wafer bin map defects using a dual-head CNN,’’ Expert Syst.
+process and improve performance. Additionally, incorpo-                                   Appl., vol. 238, Mar. 2024, Art. no. 122301. [Online]. Available:
+rating out-of-distribution detection capabilities into ClimEx                             https://www.sciencedirect.com/science/article/pii/S0957417423028038
+presents a promising direction for future research. As new                           [15] Y. Lecun, L. Bottou, Y. Bengio, and P. Haffner, ‘‘Gradient-based learning
+                                                                                          applied to document recognition,’’ Proc. IEEE, vol. 86, no. 11, pp. 2278–
+fabrication processes emerge or existing ones evolve, novel                               2324, 1998.
+defect patterns may appear. Enhancing the model’s ability                            [16] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, ‘‘ImageNet:
+to detect out-of-distribution examples would ensure the                                   A large-scale hierarchical image database,’’ in Proc. IEEE Conf. Comput.
+                                                                                          Vis. Pattern Recognit., Jun. 2009, pp. 248–255.
+system’s robustness and accuracy in identifying unforeseen                           [17] A. Krizhevsky and G. Hinton, ‘‘Learning multiple layers of features from
+defects. Furthermore, the momentum-based thresholding                                     tiny images,’’ Dept. Comput. Sci., Univ. Toronto, Toronto, ON, Canada,
+mechanism in ClimEx is fundamentally designed to handle                                   Tech. Rep. TR-2009, 2009.
+extreme imbalance, which may offer a methodological                                  [18] N. Japkowicz and S. Stephen, ‘‘The class imbalance problem: A systematic
+                                                                                          study,’’ Intell. data Anal., pp. 429–449, 2002.
+basis for extension to other industrial datasets or cross-fab                        [19] J. Kim, Y. Hur, S. Park, E. Yang, S. J. Hwang, and J. Shin, ‘‘Distribution
+scenarios with similar data characteristics. Advancements                                 aligning refinery of pseudo-label for imbalanced semi-supervised learn-
+in these directions will significantly contribute to the semi-                            ing,’’ Adv. Neural Inf. Process. Syst., pp. 14567–14579, Dec. 2020.
+                                                                                     [20] C. Wei, K. Sohn, C. Mellina, A. Yuille, and F. Yang, ‘‘CReST: A
+conductor industry’s progress, empowering it with accurate                                class-rebalancing self-training framework for imbalanced semi-supervised
+and automated wafer quality assessment and failure analysis                               learning,’’ in Proc. IEEE/CVF Conf. Comput. Vis. Pattern Recognit.
+capabilities. We expect the proposed method to lay a                                      (CVPR), Jun. 2021, pp. 10852–10861.
+strong foundation for future developments in WBM defect                              [21] L.-Z. Guo and Y.-F. Li, ‘‘Class-imbalanced semi-supervised learning with
+                                                                                          adaptive thresholding,’’ in Proc. Int. Conf. Mach. Learn., 2022, pp. 8082–
+pattern classification and hold the potential to revolutionize                            8094.
+defect inspection systems in semiconductor manufacturing                             [22] T. Nakazawa and D. V. Kulkarni, ‘‘Wafer map defect pattern classification
+processes.                                                                                and image retrieval using convolutional neural network,’’ IEEE Trans.
+                                                                                          Semicond. Manuf., vol. 31, no. 2, pp. 309–314, May 2018.
+                                                                                     [23] M. Saqlain, Q. Abbas, and J. Y. Lee, ‘‘A deep convolutional neural network
+REFERENCES                                                                                for wafer defect identification on an imbalanced dataset in semiconductor
+ [1] K. Kyeong and H. Kim, ‘‘Classification of mixed-type defect patterns                 manufacturing processes,’’ IEEE Trans. Semicond. Manuf., vol. 33, no. 3,
+     in wafer bin maps using convolutional neural networks,’’ IEEE Trans.                 pp. 436–444, Aug. 2020.
+     Semicond. Manuf., vol. 31, no. 3, pp. 395–402, Aug. 2018.                       [24] S. Manivannan, ‘‘An ensemble-based deep semi-supervised learning
+ [2] Y. Bae and S. Kang, ‘‘Supervised contrastive learning for wafer map                  for the classification of wafer bin maps defect patterns,’’ Comput.
+     pattern classification,’’ Eng. Appl. Artif. Intell., vol. 126, Nov. 2023,            Ind. Eng., vol. 172, Oct. 2022, Art. no. 108614. [Online]. Available:
+     Art. no. 107154.                                                                     https://www.sciencedirect.com/science/article/pii/S0360835222006040
+ [3] M.-J. Wu, J.-S.-R. Jang, and J.-L. Chen, ‘‘Wafer map failure pattern            [25] Y. Yang and Z. Xu, ‘‘Rethinking the value of labels for improving class-
+     recognition and similarity ranking for large-scale data sets,’’ IEEE Trans.          imbalanced learning,’’ in Proc. Adv. Neural Inf. Process. Syst., 2020,
+     Semicond. Manuf., vol. 28, no. 1, pp. 1–12, Feb. 2015.                               pp. 19290–19301.
+ [4] D.-H. Lee, ‘‘Pseudo-label: The simple and efficient semi-supervised             [26] A. Oliver, A. Odena, C. Raffel, E. D. Cubuk, and I. Goodfellow, ‘‘Realistic
+     learning method for deep neural networks,’’ in Proc. Workshop challenges             evaluation of deep semi-supervised learning algorithms,’’ in Proc. Adv.
+     Represent. Learn., 2013, vol. 3, no. 2, p. 896.                                      Neural Inf. Process. Syst., 2018, pp. 3239–3250.
+ [5] S. Laine and T. Aila, ‘‘Temporal ensembling for semi-supervised                 [27] O. J. Hénaff, A. Srinivas, J. D. Fauw, A. Razavi, C. Doersch, S. M.
+     learning,’’ in Proc. Int. Conf. Learn. Represent., 2016. [Online]. Available:        A. Eslami, and A. V. D. Oord, ‘‘Data-efficient image recognition with
+     https://openreview.net/forum?id=BJ6oOfqge                                            contrastive predictive coding,’’ in Proc. Int. Conf. Mach. Learn., 2019,
+ [6] A. Tarvainen and H. Valpola, ‘‘Mean teachers are better role models:                 pp. 4182–4192.
+     Weight-averaged consistency targets improve semi-supervised deep learn-         [28] T. Chen, S. Kornblith, K. Swersky, M. Norouzi, and G. E. Hinton, ‘‘Big
+     ing results,’’ in Proc. Adv. Neural Inf. Process. Syst., vol. 30, 2017,              self-supervised models are strong semi-supervised learners,’’ in Proc. Adv.
+     pp. 1195–1204.                                                                       Neural Inf. Process. Syst., 2020, pp. 22243–22255.
+ [7] D. Berthelot, N. Carlini, I. Goodfellow, N. Papernot, A. Oliver, and C.         [29] K. He, X. Zhang, S. Ren, and J. Sun, ‘‘Deep residual learning for
+     Raffel, ‘‘MixMatch: A holistic approach to semi-supervised learning,’’ in            image recognition,’’ in Proc. IEEE Conf. Comput. Vis. Pattern Recognit.,
+     Proc. Adv. Neural Inf. Process. Syst., 2019, pp. 5050–5060.                          Jun. 2016, pp. 770–778.
+ [8] D. Berthelot, N. Carlini, E. D. Cubuk, A. Kurakin, K. Sohn, H. Zhang,           [30] N. Srivastava, G. E. Hinton, A. Krizhevsky, I. Sutskever, and R.
+     and C. Raffel, ‘‘ReMixMatch: Semi-supervised learning with distribution              Salakhutdinov, ‘‘Dropout: A simple way to prevent neural networks from
+     matching and augmentation anchoring,’’ in Proc. Int. Conf. Learn.                    overfitting,’’ J. Mach. Learn. Res., vol. 15, no. 1, pp. 1929–1958, 2014.
+     Represent., 2020. [Online]. Available: https://openreview.net/forum?id=         [31] D. P. Kingma and J. Ba, ‘‘Adam: A method for stochastic optimization,’’
+     HklkeR4KPB                                                                           in Proc. Int. Conf. Learn. Represent. (ICLR), 2014.
+
+VOLUME 14, 2026                                                                                                                                               26681
+                                                                                        J. Jeong et al.: Semi-Supervised Learning Under Extreme Class Imbalance
+
+
+
+
+[32] X. Zhai, A. Oliver, A. Kolesnikov, and L. Beyer, ‘‘S4L: Self-supervised                                 HYUNGU KAHNG received the Ph.D. degree
+     semi-supervised learning,’’ in Proc. IEEE/CVF Int. Conf. Comput. Vis.                                   in industrial and management engineering from
+     (ICCV), Oct. 2019, pp. 1476–1485.                                                                       Korea University, Seoul, South Korea. He is an
+[33] T. Chen, ‘‘A simple framework for contrastive learning of visual                                        Assistant Professor with the Department of Con-
+     representations,’’ in Proc. Int. Conf. Mach. Learn., vol. 1, 2024, pp. 1597–                            vergence Business, Korea University, Sejong. His
+     1607.                                                                                                   research interests include industrial applications
+[34] M. Zheng, S. You, L. Huang, F. Wang, C. Qian, and C. Xu, ‘‘SimMatch:                                    of AI, distributional shift, and safety/alignment of
+     Semi-supervised learning with similarity matching,’’ in Proc. IEEE/CVF
+                                                                                                             large language models.
+     Conf. Comput. Vis. Pattern Recognit. (CVPR), Jun. 2022, pp. 14451–
+     14461.
+[35] K. Simonyan and A. Zisserman, ‘‘Very deep convolutional networks for
+     large-scale image recognition,’’ 2014, arXiv:1409.1556.
+[36] I. Loshchilov and F. Hutter, ‘‘SGDR: Stochastic gradient descent with
+     warm restarts,’’ in Proc. Int. Conf. Learn. Represent., 2016. [Online].
+     Available: https://openreview.net/forum?id=Skq89Scxx                                                     SEOUNG BUM KIM received the M.S. and Ph.D.
+                                                                                                              degrees in industrial and systems engineering from
+                                                                                                              Georgia Institute of Technology, in 2001 and 2005,
+                                                                                                              respectively. He is a Professor with the School
+                                                                                                              of Industrial and Management Engineering, Korea
+                           JINYONG JEONG received the B.S. degree                                             University. He is the Director of the Artificial
+                           from the Department of Industrial and Man-                                         Intelligence Engineering Center, Korea University.
+                           agement Engineering, Korea University, Seoul,                                      From 2005 to 2009, he was a Professor with
+                           South Korea, where he is currently pursuing the                                    the Department of Industrial and Manufacturing
+                           Ph.D. degree. His research interests include class-                                Systems Engineering, The University of Texas
+                           imbalanced semi-supervised learning and out-of-          at Arlington. He has published more than 150 internationally recognized
+                           distribution generalization.                             journals and refereed conference proceedings. His research interests include
+                                                                                    machine learning algorithms to create new methods for various problems
+                                                                                    appearing in engineering and science.
+
+
+
+
+26682                                                                                                                                           VOLUME 14, 2026
+

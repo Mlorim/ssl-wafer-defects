@@ -1,0 +1,50 @@
+# Jeong, Kahng & Kim, "Semi-Supervised Learning Under Extreme Class
+# Imbalance in Wafer Bin Map Defect Pattern Classification", IEEE Access 2026.
+# Reproduction of the 10%-labeled setting from Table 3. The paper does not
+# specify augmentation magnitudes; those assumptions are explicit below.
+dataset:
+  path: "data/raw/LSWMD.pkl"
+  labeled_ratio: 0.10
+  image_size: 96
+  rotation_degrees: 180.0
+  noise_std: 0.10
+  cutout_scale: [0.08, 0.20]
+  seed: 42
+
+model:
+  num_classes: 9
+  backbone: "resnet18"
+  dropout: 0.5
+
+method:
+  name: "climex"
+  iterations: 51200
+  threshold_update_every: 512
+  eval_every_iterations: 512
+  majority_class_index: 8       # None
+  majority_threshold: 0.95
+  threshold_momentum: 0.8
+  threshold_statistics: "rolling_window"
+
+train:
+  batch_size: 256
+  epochs: 1                     # fit управляется числом iterations
+  lr: 0.001
+  optimizer: "adam"
+  weight_decay: 0.0
+  device: "auto"
+  num_workers: 0
+  scheduler: "none"            # по требованию: LR постоянный
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/climex_checkpoint.pt"
+  results_path: "results/climex_results.json"
+
+paper_metrics:
+  climex: {f1: 0.842}

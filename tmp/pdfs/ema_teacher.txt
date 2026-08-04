@@ -1,0 +1,532 @@
+Utilizing the Mean Teacher with Supcontrast Loss
+for Wafer Pattern Recognition
+Qiyu Wei∗ , Xun Xu† , Zeng Zeng∗ , Xulei Yang†
+∗ School of Microelectronics, Shanghai University, Shanghai, China
+
+arXiv:2411.18533v1 [cs.CV] 27 Nov 2024
+
+† Institute for Infocomm Research, A*Star, Singapore, Singapore
+
+Abstract—The patterns on wafer maps play a crucial role in
+helping engineers identify the causes of production issues during
+semiconductor manufacturing. In order to reduce costs and
+improve accuracy, automation technology is essential, and recent
+developments in deep learning have led to impressive results in
+wafer map pattern recognition. In this context, inspired by the
+effectiveness of semi-supervised learning and contrastive learning
+methods, we introduce an innovative approach that integrates
+the Mean Teacher framework with the supervised contrastive
+learning loss for enhanced wafer map pattern recognition. Our
+methodology not only addresses the nuances of wafer patterns
+but also tackles challenges arising from limited labeled data.
+To further refine the process, we address data imbalance in
+the wafer dataset by employing SMOTE and under-sampling
+techniques. We conduct a comprehensive analysis of our proposed
+method and demonstrate its effectiveness through experiments
+using real-world dataset WM811K obtained from semiconductor
+manufacturers. Compared to the baseline method, our method
+has achieved 5.46%, 6.68%, 5.42%, and 4.53% improvements in
+Accuracy, Precision, Recall, and F1 score, respectively.
+Index Terms—Semiconductor wafer map, Mean teacher, Pattern recognition, Supcontrast, Imbalance, Resample
+
+I. I NTRODUCTION
+Over the past few decades, global demand for semiconductor products has been steadily increasing, and the semiconductor industry has undergone remarkable development
+following the trajectory set forth by Moore’s Law. As we inch
+closer to the physical boundaries of device miniaturization,
+the demands on quality and performance in semiconductor
+manufacturing processes have intensified unprecedentedly. Enhancing wafer manufacturing yields has emerged as an intricate and challenging endeavor [1]. In this context, Artificial
+intelligence is progressively embraced by the semiconductor
+industry, with sundry applications spanning various phases
+of the semiconductor manufacturing process [2]–[4]. Some
+work has been done to suggest practical ways to address
+this point. For example, Tsai et al. [5]proposed a wafer map
+data augmentation and failure pattern recognition method,
+Nakazawa et al. [6] proposed a method for wafer map failure
+pattern recognition using convolutional neural networks, Hao
+et al. [7] proposed deep learning framework for mixed-type
+wafer map defect pattern recognition, and these methods have
+obtained competitive results.
+In real-world fab production scenarios, vast amounts of
+data are generated daily, and it is impractical to label all of
+it manually. Most existing studies have only employed the
+labeled portion of the dataset, leaving a significant amount of
+
+unlabeled data unused. Some semi-supervised learning methods, such as Semi-supervised Clustering [8], Pseudo Label [9],
+and Temporal Ensembling [10] have been used in industry. In
+this work, we utilize the mean teacher [11] network to leverage
+this large volume of unlabeled data to enhance our model’s
+performance. Compared to other Semi-supervised methods,
+the Mean Teacher offers a more stable teacher model due to
+its moving average mechanism and consistency regularization.
+This work is also inspired by the recent advancements in the
+field of contrastive learning [12], particularly its efficiency in
+feature extraction. Building on this, we propose the integration
+of supervised contrastive learning strategies into the mean
+teacher semi-supervised learning framework. Our concept is
+that by combining the powerful feature extraction capabilities
+of supervised contrastive learning with the robustness of
+the mean teacher model, we can more effectively enhance
+the model’s performance in handling partially labeled data,
+strengthen the model’s ability to capture key features, and
+improve its adaptability in a semi-supervised learning environment. Through this innovative combination, our approach
+not only increases learning efficiency but also brings new
+perspectives and possibilities to the field of semi-supervised
+learning.
+To sum up, the contribution of this work lies in three folds:
+• We utilize the mean teacher algorithm with a supervised
+contrast learning method, leveraging a large amount of
+unlabeled data to enhance the performance of the model.
+• To rectify the issue of data imbalance, we have employed
+both up-sampling and down-sampling techniques.
+• A comprehensive comparison illustrates the efficacy of
+our method on the WM811K dataset.
+II. R ELATED W ORKS
+A. Recognition Algorithms In Wafer Datasets
+Computer vision and machine learning techniques have
+gained prominence in wafer map recognition, addressing its
+challenges. Ishida et al. [13] introduced a deep learning
+framework that autonomously discerns failure pattern characteristics. Yu et al. [14] leveraged manifold learning for wafer
+map failure detection and recognition. Meanwhile, Shim et
+al. [15] introduced an iterative active learning-based CNN for
+wafer map pattern recognition, enhancing model performance
+progressively. Jaewoong et al. [16] proposed a method of
+learning from single-defect wafer maps to classify mixed-
+
+defect wafer maps. Guangyuan et al. [17] proposed an efficient wafer defect pattern recognition method based on lightweight neural network. In addition to supervised methods,
+researchers have begun to explore the application of selfsupervised and semi-supervised methods in recognizing failure
+patterns in wafer graphs. Siyamalan [18] proposed Semisupervised imbalanced classification using a Dual-Head CNN
+for wafer bin map defects detection. WaPIRL [19] pioneered
+the application of the self-supervised learning PIRL model in
+the semiconductor domain. Geng et al. [20] applied few-shot
+learning to wafer pattern recognition, while Xu et al. [21] used
+unsupervised learning to obtain a feature representation and
+subsequently constructed a classification task based on those
+features. Although deep neural networks (DNNs) have shown
+promise, challenges like class imbalance and limited labeled
+data persist. As a remedy, Yu et al. [22] presented a multigranularity generative adversarial network (GAN) for wafer map
+enhancement. However, these methods have drawbacks. The
+limitations of self-supervised learning, such as with the PIRL
+model, lie in its utilization of unlabeled data. Its performance
+may be affected if the self-supervised task doesn’t align with
+the actual task. Iterative active learning might require multiple
+rounds of user interactions and annotations, which might be
+impractical in real-world applications.
+B. Contrastive Learning
+Contrastive learning methods for unsupervised visual representation learning have reached remarkable levels of performance. Chen et al. [12] present SimCLR: a simple framework for contrastive learning of visual representations. THEY
+simplify recently proposed contrastive self-supervised learning algorithms without requiring specialized architectures or
+a memory bank. Wang et al. [23] identify two key properties related to contrastive loss: (1) alignment (closeness)
+of features from positive pairs, and (2) uniformity of the
+induced distribution of the (normalized) features on the hypersphere, directly optimizing for these two metrics leads to
+better performance. Le-Khac et al. [24] provide a general
+Contrastive Representation Learning framework. Robinson et
+al. [25] introduce an unsupervised method for sampling hard
+negatives for contrastive learning. Based on the remarkable
+success of these unsupervised contrastive learning methods,
+some researchers have studied the mechanism of contrastive
+loss. Wang et al. [26] concentrate on the understanding of the
+behaviors of unsupervised contrastive loss. Contrastive learning, especially self-supervised contrastive learning (SSCL),
+has achieved great success in extracting powerful features.
+III. P ROPOSED M ETHODOLOGY
+Wafer map pattern recognition is challenging, and given that
+many wafer images are unlabeled, semi-supervised learning
+methods have become a necessary choice. To effectively
+address this issue, we adopted the Mean Teacher framework
+with supervised contrastive loss. Fig. 1 illustrates our proposed
+architecture for wafer map pattern recognition.
+
+A. Mean Teacher Framework
+Mean Teacher is an advanced semi-supervised learning
+method that has demonstrated outstanding performance and
+immense potential in various scenarios, especially in wafer
+map pattern recognition.
+1) Framework Overview: The underlying principle of the
+Mean Teacher algorithm is to ensure prediction consistency
+between two distinct neural network instances: the student
+and the teacher. While the student model undergoes iterative
+updates during each training epoch, the teacher model’s parameters are governed by an Exponential Moving Average (EMA)
+of the student model. This design ensures the teacher model’s
+relative stability across extensive training epochs. When the
+same unlabeled data is fed into both networks, we want the
+outputs of both to be as identical as possible so that a large
+amount of unlabeled data can be utilized to help with model
+training. The ability to utilize large amounts of unlabeled data
+is one of the main advantages of Average Teacher.
+2) Training Strategies: In the average teacher model, the
+student model and the teacher model are trained using two
+different strategies. In this case, labeled data is used to train
+only the student model. Subsequently, at each step, a very
+small amount of weights from the student model is assigned to
+the teacher model, called exponential moving average weights.
+Introducing noise during training allows the model to learn
+more universal features, so that the model can still perform
+well in real applications when faced with data that is different
+from the training set.
+Student Model Update: A classification loss can be obtained
+by taking the wafer image as input and getting the prediction
+through the student model. Then using unlabeled data, a consistency loss measure is computed by comparing the outputs
+of the student model and the teacher model, and this loss
+indicates the difference in prediction between the two models.
+The two losses were summed and back-propagated to update
+the parameters of the student model.
+Teacher Model Update and EMA: Concurrently with the
+student’s updates, the teacher model’s parameters undergo
+evolutionary adjustments governed by the Exponential Moving
+Average (EMA). Mathematically, the EMA for the teacher
+model’s parameters at time t, denoted θteacher (t), is defined
+as:
+θteacher (t) = α · θteacher (t − 1) + (1 − α) · θstudent (t)
+
+(1)
+
+Where α is a decay factor within [0,1]. The adoption of
+EMA ensures a smoother learning trajectory for the teacher
+model, with α determining the weightage of past observations.
+This EMA-driven approach bestows the teacher model with
+enhanced stability and the capability to leverage historical
+learning.
+B. Supervised Contrastive Learning
+In our research, we applied the concept of Supervised
+Contrastive Learning (SCL) loss, as outlined in [27]. We
+
+Fig. 1.
+
+Illustration of Mean Teacher Framework with supercontrast loss.
+
+hypothesize that contrastive learning provides superior guidance for intermediate layers compared to traditional taskspecific loss supervision. Typically, this method identifies two
+augmentations from the same image as a ’positive pair,’ and
+those from different images as ’negative pairs’. The training
+process involves teaching the neural network to reduce the
+distance between positive pairs while increasing it for negative
+pairs. This enables the network to adapt to a range of data
+enhancements, such as color variations and random grayscale
+transformations. Given that these enhancements are often lowlevel, task-agnostic, and adaptable to a wide range of visual
+tasks, we believe they offer more valuable insights for the
+learning of intermediate layers.
+This loss function aims to improve the discriminative capabilities of learned representations by utilizing label information. Essentially, it leverages the data’s label information to
+steer the contrastive learning process. The core of Supervised
+Contrastive Learning is its loss function. Given a batch of
+data, which includes positive samples (similar samples) and
+negative samples (dissimilar samples), the loss function can
+be defined as:
+
+ized feature vectors of samples i and p, respectively.
+In the process, we typically adjust the loss by scaling it
+with |P (i)|. Unlike the self-supervised contrastive loss, where
+a query and a key are considered as a positive pair if they
+are augmented versions of the same image, the supervised
+contrastive loss views them as a positive pair if they come
+from the same category.
+Feature representations are obtained through a deep learning
+model, transforming the input data into a form that is suitable
+for effective comparison. The goal is to adjust the model
+parameters so that the feature representations of samples
+from the same class are brought closer together, while those
+from different classes are pushed further apart. In supervised
+settings, a binary mask M is applied where Mij = 1 if
+samples i and j share the same label, and 0 otherwise. This
+mask is used to identify positive pairs in the loss computation.
+For unsupervised settings, an identity matrix is used as the
+mask, aligning the loss with the SimCLR formulation.
+We add this supervised contrastive loss as additional information to the original loss. Mathematically, the total loss can
+be represented as:
+
+N
+X
+−1 X
+exp(f̂i · f̂p /τ )
+Lsupcontrast =
+log P
+|P
+(i)|
+a∈A(i) exp(f̂i · f̂a /τ )
+i=1
+
+L = Lconsistency + Lclassif ication + Lsupcontrast
+
+p∈P (i)
+
+(2)
+This formulation uses a temperature-scaled cosine similarity
+metric, promoting an environment where similar samples are
+more closely aligned in the feature space, where:
+• P (i) denotes the set of indices of all positive samples in
+the batch for the i-th sample.
+• A(i) represents the set of indices for all samples in the
+batch, including i itself.
+• τ is the temperature parameter.
+• f̂i · f̂p is the dot product of the normalized feature vectors,
+serving as a similarity measure. f̂i and f̂p are the normal-
+
+(3)
+
+This approach in Supervised Contrastive Learning enables the
+model not just to differentiate between different categories of
+samples, but also to understand the nuances within the same
+category.
+IV. E XPERIMENTS
+A. Experimental Settings
+We conducted experiments on the WM-811K wafer map
+dataset [28], which is a public dataset widely used in semiconductor manufacturing research. It includes 811,457 wafer map
+images from 46,294 lots, with 172,950 manually labeled, and
+contains nine patterns. The original dataset has a significant
+
+TABLE I
+OVERALL E XPERIMENT R ESULTS
+Methods
+Resnet (Baseline)
++ mean teacher
++ SupConLoss
++ mean teacher & SupConLoss
+
+Overall Results
+( Accuracy, Precision, Recall, F1 )
+79.17%, 79.56%, 78.99%, 78.87%
+81.14%, 82.55%, 81.15%, 81.29%
+84.13%, 85.53%, 83.37%, 82.98%
+84.63%, 86.24%, 84.41%, 83.40%
+
+imbalance. The Non-Pattern pattern accounts for a vast majority, while the Donut and NearFull patterns only make up 0.3%
+and 0.1%, respectively. To address this issue, we have explored
+both over-sampling and under-sampling techniques. We use
+the Synthetic Minority Over-sampling Technique (SMOTE)
+[29] on the training set to generate synthetic samples by
+interpolating between neighboring samples of the minority,
+then the distribution of the data set is well-balanced.
+For implementation, we utilized a mean teacher algorithm
+framework with a ResNet18-based classification network. The
+training was conducted on 10% of the WM811K dataset,
+with the remaining data serving as unlabeled input for both
+student and teacher networks, ensuring a fair comparison. In
+this paper, we employ four widely used evaluation metrics,
+namely Precision, Recall, F1 score, and Accuracy, to assess
+the results of our experiments.
+
+TABLE II
+E XPERIMENT R ESULTS D ETAILS
+Method
+
+Accuracy, Precision, Recall, F1
+
+Center
+Donut
+Edge-Loc
+Edge-Ring
+Loc
+Resnet(Baseline)
+Near-full
+Random
+Scratch
+None
+
+97.67%, 88.97%, 89.38%, 89.17%
+97.72%, 92.55%, 89.53%, 91.02%
+89.03%, 71.75%, 51.02%, 59.63%
+98.38%, 95.80%, 92.78%, 94.27%
+89.38%, 52.56%, 48.15%, 50.26%
+100.00%, 92.36%, 100.00%, 96.03%
+96.76%, 94.38%, 86.30%, 90.16%
+94.29%, 57.14%, 74.61%, 64.72%
+95.09%, 70.55%, 79.18%, 74.62%
+
+Center
+Donut
+Edge-Loc
+Edge-Ring
+Loc
+Near-full
+Random
+Scratch
+None
+
+96.11%, 95.48%, 83.15%, 88.89%
+98.53%, 87.50%, 93.11%, 90.22%
+91.20%, 78.72%, 59.82%, 67.98%
+99.19%, 93.56%, 96.22%, 94.87%
+90.80%, 67.24%, 56.46%, 61.38%
+100.00%, 98.85%, 100.00%, 99.42%
+96.56%, 96.33%, 85.28%, 90.47%
+96.01%, 56.84%, 82.41%, 67.27%
+93.88%, 68.46%, 73.92%, 71.09%
+
+Center
+Donut
+Edge-Loc
+Edge-Ring
+Loc
+Near-full
+Random
+Scratch
+None
+
+97.98%, 67.80%, 90.91%, 77.67%
+95.47%, 76.67%, 71.88%, 74.19%
+90.93%, 85.71%, 62.50%, 72.29%
+98.99%, 100.00%, 94.74%, 97.30%
+98.49%, 69.23%, 92.31%, 79.12%
+100.00%, 97.78%, 100.00%, 98.88%
+98.49%, 82.81%, 94.64%, 88.33%
+98.49%, 94.55%, 94.55%, 94.55%
+89.42%, 95.24%, 48.78%, 64.52%
+
+Center
+Donut
+Edge-Loc
+Edge-Ring
+Loc
+Near-full
+Random
+Scratch
+None
+
+95.97%, 67.92%, 81.82%, 74.23%
+98.99%, 91.84%, 95.74%, 93.75%
+86.40%, 100.00%, 38.64%, 55.74%
+99.50%, 81.36%, 97.96%, 88.89%
+98.49%, 82.93%, 91.89%, 87.18%
+100.00%, 88.10%, 100.00%, 93.67%
+99.50%, 84.21%, 97.96%, 90.57%
+94.46%, 90.00%, 71.05%, 79.41%
+95.97%, 89.80%, 84.62%, 87.13%
+
++ Mean Teacher
+
++ SupConLoss
+
+B. Performance study
+In our comparative study, we established ResNet18 as
+the baseline and conducted multiple control experiments,
+including combinations of ResNet with SupConLoss, mean
+teacher, and mean teacher with SupConLoss. As illustrated
+in Table I, The experimental results demonstrated that the
+combination of Mean Teacher and SupConLoss yields the
+best performance. This finding proves that combining Mean
+Teacher with SupConLoss enhances learning efficiency, this
+combination achieved improvements of 5.46%, 6.68%, 5.42%,
+and 4.53% across the four metrics, respectively.
+The ablation study further clarified the individual contributions of SupConLoss and the Mean Teacher method. A
+comparative analysis between Mean Teacher + SupConLoss
+and Mean Teacher only revealed an overall enhancement of
+2.11% in the F1 score. As detailed in Table II , the inclusion of
+SupConLoss consistently improved performance, particularly
+in categories like ”Donut”, ”Loc”, ”Scratch”, and ”None”,
+suggesting that the combined model might be more effective in
+handling complex features, SupConLoss potentially provides
+a more robust feature space for classification tasks, thereby
+adding significant value to the learning process.
+When combined with SupConLoss, the ResNet model
+showed a 4.11% improvement in the F1 score across most
+categories compared to ResNet alone. This was particularly
+evident in categories like ”Edge-Ring” and ”Near-full”, signifying that SupConLoss can significantly enhance performance
+in specific scenarios. This suggests that SupConLoss has a
+certain level of applicability and effectiveness across different
+model structures.
+
+Class
+
++ Mean Teacher
+& SupConLoss
+
+Regarding the Mean Teacher method, it achieved a 2.42%
+improvement in the F1 score compared to the standalone
+ResNet. The detailed data presented in Table II reveals significant performance enhancements of the mean teacher model
+over the solo ResNet in most categories. For instance, in categories like ”Edge-Loc”, ”Edge-Ring”, ”Loc” and ”Near-full”.
+The mean teacher can enhance the model’s generalization
+capabilities on unlabeled data through smoothed labels and
+model outputs, thereby bolstering overall model performance.
+V. C ONCLUSION
+In this work, we presented a simple but efficient approach
+for wafer defect classification, capitalizing on the strengths
+of the Mean Teacher framework and supervised contrastive
+loss. Our methodology effectively addresses the intricacies of
+wafer patterns and the challenges stemming from limited labeled data. Quantitative evaluations corroborated the superior
+performance of our approach over traditional methods.
+
+R EFERENCES
+[1] T. Theodosiou, A. Rapti, K. Papageorgiou, T. Tziolas, E. Papageorgiou,
+N. Dimitriou, G. Margetis, and D. Tzovaras, “A review study on mlbased methods for defect-pattern recognition in wafer maps,” Procedia
+Computer Science, vol. 217, pp. 570–583, 2023.
+[2] T. Kim and K. Behdinan, “Advances in machine learning and deep learning applications towards wafer map defect recognition and classification:
+a review,” Journal of Intelligent Manufacturing, pp. 1–33, 2022.
+[3] J. Choi, D. Suh, and M.-O. Otto, “Boosted stacking ensemble machine
+learning method for wafer map pattern classification.” Computers, Materials & Continua, vol. 74, no. 2, 2023.
+[4] Q. Wei, W. Zhao, X. Zheng, and Z. Zeng, “Wafer map defect patterns
+semi-supervised classification using latent vector representation,” in
+2023 IEEE International Conference on Cybernetics and Intelligent
+Systems (CIS) and IEEE Conference on Robotics, Automation and
+Mechatronics (RAM). IEEE, 2023, pp. 192–197.
+[5] T.-H. Tsai and Y.-C. Lee, “A light-weight neural network for wafer
+map classification based on data augmentation,” IEEE Transactions on
+Semiconductor Manufacturing, vol. 33, no. 4, pp. 663–672, 2020.
+[6] T. Nakazawa and D. V. Kulkarni, “Wafer map defect pattern classification and image retrieval using convolutional neural network,” IEEE
+Transactions on Semiconductor Manufacturing, vol. 31, no. 2, pp. 309–
+314, 2018.
+[7] H. Sheng, K. Cheng, X. Jin, X. Jiang, C. Dong, and T. Han, “An
+efficient deep learning framework for mixed-type wafer map defect
+pattern recognition,” AIP Advances, vol. 14, no. 4, 2024.
+[8] E. Bair, “Semi-supervised clustering methods,” Wiley Interdisciplinary
+Reviews: Computational Statistics, vol. 5, no. 5, pp. 349–361, 2013.
+[9] D.-H. Lee et al., “Pseudo-label: The simple and efficient semi-supervised
+learning method for deep neural networks,” in Workshop on challenges
+in representation learning, ICML, vol. 3, no. 2. Atlanta, 2013, p. 896.
+[10] S. Laine and T. Aila, “Temporal ensembling for semi-supervised learning,” arXiv preprint arXiv:1610.02242, 2016.
+[11] A. Tarvainen and H. Valpola, “Mean teachers are better role models: Weight-averaged consistency targets improve semi-supervised deep
+learning results,” Advances in neural information processing systems,
+vol. 30, 2017.
+[12] T. Chen, S. Kornblith, M. Norouzi, and G. Hinton, “A simple framework
+for contrastive learning of visual representations,” in International
+conference on machine learning. PMLR, 2020, pp. 1597–1607.
+[13] T. Ishida, I. Nitta, D. Fukuda, and Y. Kanazawa, “Deep learning-based
+wafer-map failure pattern recognition framework,” in 20th International
+Symposium on Quality Electronic Design (ISQED). IEEE, 2019, pp.
+291–297.
+[14] J. Yu and X. Lu, “Wafer map defect detection and recognition using joint
+local and nonlocal linear discriminant analysis,” IEEE Transactions on
+Semiconductor Manufacturing, vol. 29, no. 1, pp. 33–43, 2015.
+[15] J. Shim, S. Kang, and S. Cho, “Active learning of convolutional
+neural network for cost-effective wafer map pattern classification,” IEEE
+Transactions on Semiconductor Manufacturing, vol. 33, no. 2, pp. 258–
+266, 2020.
+[16] J. Shim and S. Kang, “Learning from single-defect wafer maps to
+classify mixed-defect wafer maps,” Expert Systems with Applications,
+vol. 233, p. 120923, 2023.
+[17] G. Deng and H. Wang, “Efficient mixed-type wafer defect pattern
+recognition based on light-weight neural network,” Micromachines,
+vol. 15, no. 7, p. 836, 2024.
+[18] S. Manivannan, “Semi-supervised imbalanced classification of wafer bin
+map defects using a dual-head cnn,” Expert Systems with Applications,
+vol. 238, p. 122301, 2024.
+[19] I. Misra and L. v. d. Maaten, “Self-supervised learning of pretextinvariant representations,” in Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, 2020, pp. 6707–6717.
+[20] H. Geng, F. Yang, X. Zeng, and B. Yu, “When wafer failure pattern
+classification meets few-shot learning and self-supervised learning,” in
+2021 IEEE/ACM International Conference On Computer Aided Design
+(ICCAD). IEEE, 2021, pp. 1–8.
+[21] Q. Xu, N. Yu, and H. Yu, “Unsupervised representation learning
+for large-scale wafer maps in micro-electronic manufacturing,” IEEE
+Transactions on Consumer Electronics, 2023.
+[22] J. Yu and J. Liu, “Multiple granularities generative adversarial network
+for recognition of wafer map defects,” IEEE Transactions on Industrial
+Informatics, vol. 18, no. 3, pp. 1674–1683, 2021.
+
+[23] T. Wang and P. Isola, “Understanding contrastive representation learning
+through alignment and uniformity on the hypersphere,” in International
+Conference on Machine Learning. PMLR, 2020, pp. 9929–9939.
+[24] P. H. Le-Khac, G. Healy, and A. F. Smeaton, “Contrastive representation
+learning: A framework and review,” Ieee Access, vol. 8, pp. 193 907–
+193 934, 2020.
+[25] J. Robinson, C.-Y. Chuang, S. Sra, and S. Jegelka, “Contrastive learning
+with hard negative samples,” arXiv preprint arXiv:2010.04592, 2020.
+[26] F. Wang and H. Liu, “Understanding the behaviour of contrastive loss,”
+in Proceedings of the IEEE/CVF conference on computer vision and
+pattern recognition, 2021, pp. 2495–2504.
+[27] P. Khosla, P. Teterwak, C. Wang, A. Sarna, Y. Tian, P. Isola,
+A. Maschinot, C. Liu, and D. Krishnan, “Supervised contrastive learning,” Advances in neural information processing systems, vol. 33, pp.
+18 661–18 673, 2020.
+[28] M.-J. Wu, J.-S. R. Jang, and J.-L. Chen, “Wafer map failure pattern
+recognition and similarity ranking for large-scale data sets,” IEEE
+Transactions on Semiconductor Manufacturing, vol. 28, no. 1, pp. 1–12,
+2014.
+[29] N. V. Chawla, K. W. Bowyer, L. O. Hall, and W. P. Kegelmeyer, “Smote:
+synthetic minority over-sampling technique,” Journal of artificial intelligence research, vol. 16, pp. 321–357, 2002.
+
+

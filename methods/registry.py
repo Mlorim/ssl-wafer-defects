@@ -18,6 +18,7 @@ from .cbam_cnn import CBAMCNNMethod
 from .hybrid_vit import HybridCNNViTMethod
 from .mm_wae import MMWAEMethod
 from .efficient_cnn import EfficientCNNMethod
+from .climex import ClimExMethod
 
 
 METHOD_REGISTRY = {
@@ -30,6 +31,7 @@ METHOD_REGISTRY = {
     "hybrid_cnn_vit": HybridCNNViTMethod,
     "mm_wae": MMWAEMethod,
     "efficient_cnn": EfficientCNNMethod,
+    "climex": ClimExMethod,
 }
 
 
@@ -82,4 +84,6 @@ def build_method(method_name: str, model, optimizer_factory, device: str, config
     elif method_name == "mm_wae":
         return method_cls(model, optimizer_factory, device=device, config=config)
     elif method_name == "efficient_cnn":
+        return method_cls(model, optimizer_factory, device=device, config=config)
+    elif method_name == "climex":
         return method_cls(model, optimizer_factory, device=device, config=config)

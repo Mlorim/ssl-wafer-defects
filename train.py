@@ -13,6 +13,7 @@ train.py
     python train.py --config configs/hybrid_cnn_vit.yaml --method hybrid_cnn_vit
     python train.py --config configs/mm_wae.yaml --method mm_wae
     python train.py --config configs/efficient_cnn.yaml --method efficient_cnn
+    python train.py --config configs/climex.yaml --method climex
 
 Флаг --method переопределяет method.name из конфига. Список допустимых
 значений берётся из METHOD_REGISTRY — при добавлении нового метода (новый
@@ -107,6 +108,8 @@ def main():
     config = load_config(args.config)
 
     method_name = args.method or config["method"]["name"]
+    checkpoint_path = config["output"]["checkpoint_path"].format(method=method_name)
+    results_path = config["output"]["results_path"].format(method=method_name)
     print(f"=== Метод: {method_name} ===")
 
     seed = config["dataset"]["seed"]
@@ -121,6 +124,12 @@ def main():
         print(
             f"Development: {len(data['development_indices'])}, "
             f"Test: {len(data['test_indices'])}"
+        )
+    elif method_name == "climex":
+        print(
+            f"Labeled: {len(data['labeled_indices'])}, "
+            f"Unlabeled: {len(data['unlabeled_indices'])}, "
+            f"Val: {len(data['val_indices'])}, Test: {len(data['test_indices'])}"
         )
     else:
         print(
@@ -143,14 +152,14 @@ def main():
         loader_factory=loader_factory,
         epochs=config["train"]["epochs"],
         eval_every=config["eval"]["eval_every"],
-        checkpoint_path=config["output"]["checkpoint_path"],
+        checkpoint_path=checkpoint_path,
     )
     print(f"\nЛучший F1 во время обучения: {result['best_f1']*100:.2f}%")
     if result.get("optimal_epochs") is not None:
         print(f"Оптимальное число эпох (early stopping по валидации): {result['optimal_epochs']}")
 
     print("\n=== Финальная оценка (best checkpoint) ===")
-    method.load_state_dict(torch.load(config["output"]["checkpoint_path"]))
+    method.load_state_dict(torch.load(checkpoint_path))
     test_loader = method.build_eval_loader(data, loader_factory)
     y_true, y_pred = method.evaluate_per_class(test_loader)
 
@@ -170,13 +179,15 @@ def main():
         "paper_metrics": paper_result,
         "epochs_trained": config["train"]["epochs"],
     }
+    if result.get("iterations_trained") is not None:
+        result_payload["iterations_trained"] = result["iterations_trained"]
     if result.get("pseudo_label_diagnostics") is not None:
         result_payload["pseudo_label_diagnostics"] = result["pseudo_label_diagnostics"]
 
     update_results(
         method_name,
         result_payload,
-        config["output"]["results_path"],
+        results_path,
     )
 
 

@@ -6,6 +6,7 @@ dataset:
   path: "data/raw/LSWMD.pkl"
   labeled_ratio: 0.10        # статья: "training on 10% of the WM811K dataset"
   balance_method: "smote"    # smote | undersample | none
+  val_ratio: 0.10            # отделяется ДО labeled/unlabeled split и SMOTE; test не участвует в выборе checkpoint
   seed: 42
 
 model:
@@ -25,21 +26,21 @@ method:
 
 train:
   batch_size: 64
-  epochs: 2
+  epochs: 30                 # статья число эпох не указывает; честный фиксированный максимум
   lr: 0.001
   optimizer: "adam"
   weight_decay: 0.0001
   device: "auto"                # auto (cuda -> mps -> cpu) | cuda | mps | cpu
-  num_workers: 4
+  num_workers: 0             # macOS spawn дублирует крупные numpy-массивы в workers; 0 предотвращает переполнение RAM
 
 eval:
   metrics: ["accuracy", "precision", "recall", "f1"]
   per_class: true
-  eval_every: 5                # считать метрики каждые N эпох
+  eval_every: 1                # checkpoint выбирается по macro-F1 на отдельном validation
 
 output:
   results_dir: "results"
-  checkpoint_path: "results/mean_teacher_supcon_checkpoint.pt"
+  checkpoint_path: "results/{method}_checkpoint.pt"
   results_path: "results/mean_teacher_supcon_results.json"
 
 # Заявленные в статье результаты (Table I), используются в compare_to_paper.
