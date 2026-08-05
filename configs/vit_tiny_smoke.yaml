@@ -1,0 +1,37 @@
+dataset:
+  path: "Wafer_Map_Datasets.npz"
+  kaggle_slug: "co1d7era/mixedtype-wafer-defect-datasets"
+  seed: 42
+  image_size: 224
+  val_ratio: 0.15
+  rotation_degrees: 15
+  zoom_scale: [0.95, 1.0]
+  max_samples: 380
+
+model:
+  pretrained: false
+
+method:
+  name: "vit_tiny"
+
+train:
+  batch_size: 16
+  epochs: 1
+  lr: 0.0001
+  optimizer: "adam"
+  weight_decay: 0.0
+  device: "auto"
+  num_workers: 0
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/vit_tiny_smoke_checkpoint.pt"
+  results_path: "results/vit_tiny_smoke_results.json"
+
+paper_metrics:
+  vit_tiny: {accuracy: 0.984, f1: 0.984}

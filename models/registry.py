@@ -15,6 +15,7 @@ from .hybrid_vit import HybridCNNViT
 from .mm_wae import MMWAE
 from .efficient_cnn import EfficientWaferCNN
 from .climex import ClimExClassifier
+from .vit_tiny import WaferViTTiny
 
 
 def _build_baseline(num_classes: int, config: dict) -> nn.Module:
@@ -99,6 +100,13 @@ def _build_climex(num_classes: int, config: dict) -> nn.Module:
     )
 
 
+def _build_vit_tiny(num_classes: int, config: dict) -> nn.Module:
+    return WaferViTTiny(
+        num_classes=num_classes,
+        pretrained=config.get("pretrained", True),
+    )
+
+
 MODEL_REGISTRY: Dict[str, Callable[[int, dict], nn.Module]] = {
     "baseline": _build_baseline,
     "mean_teacher": _build_baseline,
@@ -110,6 +118,7 @@ MODEL_REGISTRY: Dict[str, Callable[[int, dict], nn.Module]] = {
     "mm_wae": _build_mm_wae,
     "efficient_cnn": _build_efficient_cnn,
     "climex": _build_climex,
+    "vit_tiny": _build_vit_tiny,
 }
 
 

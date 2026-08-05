@@ -14,6 +14,7 @@ train.py
     python train.py --config configs/mm_wae.yaml --method mm_wae
     python train.py --config configs/efficient_cnn.yaml --method efficient_cnn
     python train.py --config configs/climex.yaml --method climex
+    python train.py --config configs/vit_tiny.yaml --method vit_tiny
 
 Флаг --method переопределяет method.name из конфига. Список допустимых
 значений берётся из METHOD_REGISTRY — при добавлении нового метода (новый
@@ -131,6 +132,11 @@ def main():
             f"Unlabeled: {len(data['unlabeled_indices'])}, "
             f"Val: {len(data['val_indices'])}, Test: {len(data['test_indices'])}"
         )
+    elif method_name == "vit_tiny":
+        print(
+            f"Train: {len(data['train_indices'])}, Val: {len(data['val_indices'])}, "
+            f"Test: {len(data['test_indices'])}"
+        )
     else:
         print(
             f"Labeled: {len(data['labeled_images'])}, "
@@ -138,7 +144,9 @@ def main():
             f"Test: {len(data['test_images'])}"
         )
 
-    model = build_model(method_name, num_classes=NUM_CLASSES, config=config["model"])
+    num_classes = data.get("num_classes", NUM_CLASSES)
+    class_names = data.get("class_names", CLASS_NAMES)
+    model = build_model(method_name, num_classes=num_classes, config=config["model"])
     optimizer_factory = make_optimizer_factory(config["train"])
     method = build_method(method_name, model, optimizer_factory, device=device, config=config)
 
@@ -164,7 +172,7 @@ def main():
     y_true, y_pred = method.evaluate_per_class(test_loader)
 
     final_metrics = compute_metrics(y_true, y_pred)
-    report = per_class_report(y_true, y_pred, CLASS_NAMES)
+    report = per_class_report(y_true, y_pred, class_names)
     print_per_class_report(report)
 
     print("\n=== Сравнение со статьёй ===")

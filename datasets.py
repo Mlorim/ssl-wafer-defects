@@ -87,6 +87,16 @@ NUM_CLASSES = len(CLASS_NAMES)
 
 WAFER_SIZE = 64  # ресайз всех wafer map до фиксированного размера (H=W=64)
 
+WM38K_BASE_DEFECTS = ("C", "D", "EL", "ER", "L", "NF", "S", "R")
+WM38K_CLASS_NAMES = (
+    "Normal", "C", "D", "EL", "ER", "L", "NF", "S", "R",
+    "C+EL", "C+ER", "C+L", "C+S", "D+EL", "D+ER", "D+L", "D+S",
+    "EL+L", "EL+S", "ER+L", "ER+S", "L+S",
+    "C+EL+L", "C+EL+S", "C+ER+L", "C+ER+S", "C+L+S",
+    "D+EL+L", "D+EL+S", "D+ER+L", "D+ER+S", "D+L+S", "EL+L+S", "ER+L+S",
+    "C+L+EL+S", "C+L+ER+S", "D+L+EL+S", "D+L+ER+S",
+)
+
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -894,6 +904,40 @@ class DataLoaderFactory:
         )
 
 
+class WM38KDataset(Dataset):
+    """WM-38K maps with augmentation confined to the training split."""
+
+    def __init__(self, images, indices, labels, train, image_size=224,
+                 rotation_degrees=180, zoom_scale=(0.85, 1.0)):
+        self.images = images
+        self.indices = np.asarray(indices, dtype=np.int64)
+        self.labels = labels
+        ops = []
+        if train:
+            ops.extend([
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomRotation(rotation_degrees, interpolation=InterpolationMode.BILINEAR),
+                transforms.RandomResizedCrop(
+                    image_size, scale=zoom_scale, ratio=(1.0, 1.0),
+                    interpolation=InterpolationMode.BILINEAR,
+                ),
+            ])
+        else:
+            ops.append(transforms.Resize(
+                (image_size, image_size), interpolation=InterpolationMode.BILINEAR
+            ))
+        self.transform = transforms.Compose(ops)
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, position):
+        idx = self.indices[position]
+        image = torch.from_numpy(self.images[idx].astype(np.float32, copy=False)).unsqueeze(0) / 2.0
+        return self.transform(image), int(self.labels[idx])
+
+
 def load_wm811k_native(path: str, size: int = 26) -> Tuple[np.ndarray, np.ndarray]:
     """
     Загружает WM-811K, оставляя только LABELED карты в исходном разрешении
@@ -1253,6 +1297,77 @@ def prepare_datasets_efficient_cnn(data_path: str, seed: int = 42) -> dict:
     }
 
 
+def load_wm38k(data_path: str, kaggle_slug: Optional[str] = None):
+    """Load Kaggle WM-38K and convert 8-bit multi-hot patterns to 38 classes."""
+    if not os.path.exists(data_path) and kaggle_slug:
+        try:
+            import kagglehub
+            dataset_dir = kagglehub.dataset_download(kaggle_slug)
+            data_path = os.path.join(dataset_dir, os.path.basename(data_path))
+        except Exception as exc:
+            raise FileNotFoundError(
+                f"Не удалось скачать WM-38K ({kaggle_slug}): {exc}"
+            ) from exc
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Не найден WM-38K: {data_path}")
+    with np.load(data_path, allow_pickle=False) as archive:
+        images = archive["arr_0"].astype(np.uint8)
+        pattern_vectors = archive["arr_1"].astype(np.uint8)
+
+    def vector_for(name):
+        vector = [0] * len(WM38K_BASE_DEFECTS)
+        if name != "Normal":
+            for defect in name.split("+"):
+                vector[WM38K_BASE_DEFECTS.index(defect)] = 1
+        return tuple(vector)
+
+    pattern_to_class = {
+        vector_for(name): class_idx for class_idx, name in enumerate(WM38K_CLASS_NAMES)
+    }
+    try:
+        labels = np.asarray(
+            [pattern_to_class[tuple(row.tolist())] for row in pattern_vectors], dtype=np.int64
+        )
+    except KeyError as exc:
+        raise ValueError(f"Неизвестная комбинация дефектов WM-38K: {exc.args[0]}") from exc
+    return images, labels
+
+
+def prepare_datasets_vit_tiny(data_path: str, seed=42, val_ratio=0.10,
+                              max_samples=None, kaggle_slug=None):
+    """Stratified 72/8/20 split; the test set remains untouched until final evaluation."""
+    images, labels = load_wm38k(data_path, kaggle_slug=kaggle_slug)
+    all_indices = np.arange(len(labels))
+    if max_samples is not None and max_samples < len(all_indices):
+        # Smoke runs need enough representatives of every class for both
+        # stratified splits; proportional truncation would leave the rare NF
+        # class with only one example.
+        rng = np.random.RandomState(seed)
+        per_class = max(3, int(max_samples) // len(WM38K_CLASS_NAMES))
+        all_indices = np.concatenate([
+            rng.choice(np.where(labels == cls)[0], per_class, replace=False)
+            for cls in range(len(WM38K_CLASS_NAMES))
+        ])
+        rng.shuffle(all_indices)
+    train_val, test = train_test_split(
+        all_indices, test_size=0.20, random_state=seed, shuffle=True,
+        stratify=labels[all_indices],
+    )
+    train, val = train_test_split(
+        train_val, test_size=val_ratio, random_state=seed, shuffle=True,
+        stratify=labels[train_val],
+    )
+    return {
+        "images": images,
+        "all_labels": labels,
+        "train_indices": np.asarray(train),
+        "val_indices": np.asarray(val),
+        "test_indices": np.asarray(test),
+        "class_names": list(WM38K_CLASS_NAMES),
+        "num_classes": len(WM38K_CLASS_NAMES),
+    }
+
+
 def _limit_stratified_indices(indices, labels, maximum, seed):
     indices = np.asarray(indices, dtype=np.int64)
     if maximum is None or len(indices) <= maximum:
@@ -1372,6 +1487,13 @@ _DATASET_PIPELINES = {
         max_labeled_samples=config["dataset"].get("max_labeled_samples"),
         max_unlabeled_samples=config["dataset"].get("max_unlabeled_samples"),
         max_eval_samples=config["dataset"].get("max_eval_samples"),
+    ),
+    "vit_tiny": lambda config, seed: prepare_datasets_vit_tiny(
+        data_path=config["dataset"]["path"],
+        seed=seed,
+        val_ratio=config["dataset"].get("val_ratio", 0.10),
+        max_samples=config["dataset"].get("max_samples"),
+        kaggle_slug=config["dataset"].get("kaggle_slug"),
     ),
 }
 

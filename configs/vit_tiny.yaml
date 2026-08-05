@@ -1,0 +1,38 @@
+# Mohammad and Ryu, "Semiconductor Wafer Map Defect Classification with
+# Tiny Vision Transformers", arXiv:2504.02494.
+dataset:
+  path: "Wafer_Map_Datasets.npz"
+  kaggle_slug: "co1d7era/mixedtype-wafer-defect-datasets"
+  seed: 42
+  image_size: 224
+  val_ratio: 0.10
+  rotation_degrees: 180
+  zoom_scale: [0.85, 1.0]
+
+model:
+  pretrained: true
+
+method:
+  name: "vit_tiny"
+
+train:
+  batch_size: 64
+  epochs: 30
+  lr: 0.0001
+  optimizer: "adam"
+  weight_decay: 0.0
+  device: "auto"
+  num_workers: 0
+
+eval:
+  metrics: ["accuracy", "precision", "recall", "f1"]
+  per_class: true
+  eval_every: 1
+
+output:
+  results_dir: "results"
+  checkpoint_path: "results/vit_tiny_checkpoint.pt"
+  results_path: "results/vit_tiny_results.json"
+
+paper_metrics:
+  vit_tiny: {accuracy: 0.984, f1: 0.984}
